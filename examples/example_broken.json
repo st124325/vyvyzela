@@ -1,0 +1,14 @@
+{
+  "name": "Пример намеренно некорректного файла — для проверки валидации",
+  "ground_stations": [
+    { "name": "Мурманск", "lat": 68.97, "lon": 33.09, "gateway": false }
+  ],
+  "planes": [
+    { "raan": 0, "inclination": 86, "satellites": 0 }
+  ],
+  "step_seconds": "120",
+  "duration_hours": -5,
+  "outages": [
+    { "type": "satellite", "id": "P1-S1", "start_hour": 10, "end_hour": 2 }
+  ]
+}
