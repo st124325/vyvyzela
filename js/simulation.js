@@ -201,10 +201,46 @@
     return best;
   }
 
+  /* Материализует внутренний config в формат файла-сценария (ground_stations/planes/...),
+     который понимает загрузчик. Обеспечивает цикл «выгрузить → повторно загрузить» из ТЗ.
+     Номера плоскостей (id) сохраняются, чтобы id спутников и ссылки в отказах не «поехали». */
+  function configToScenario(config, name) {
+    let planes;
+    if (config.customPlanes) {
+      planes = config.customPlanes.map(p => ({
+        id: p.id, raan: p.raan, inclination: p.inclination, satellites: p.satellites, phase_offset: p.phase_offset || 0
+      }));
+    } else {
+      planes = [];
+      for (let p = 1; p <= 3; p++) {
+        if (!config.activePlanes.includes(p)) continue;
+        planes.push({
+          id: p,
+          raan: config.raanBase[p - 1] + (config.raanOffset[p - 1] || 0),
+          inclination: config.inclinationDeg,
+          satellites: 16,
+          phase_offset: config.phaseOffset[p - 1] || 0
+        });
+      }
+    }
+    return {
+      name: name || 'Экспортированный сценарий',
+      ground_stations: config.groundStations.map(g => ({ name: g.name, lat: g.lat, lon: g.lon, gateway: !!g.gateway })),
+      planes,
+      isl_max_range_km: config.islMaxRangeKm,
+      min_elevation_deg: config.minElevationDeg,
+      duration_hours: config.durationHours,
+      step_seconds: config.stepSeconds,
+      outages: (config.outages || []).map(o => o.type === 'gateway'
+        ? { type: 'gateway', start_hour: o.startHour, end_hour: o.endHour }
+        : { type: 'satellite', id: o.id, start_hour: o.startHour, end_hour: o.endHour })
+    };
+  }
+
   const Simulation = {
     DEFAULT_CONFIG, PLANE_COLORS,
     generateSatellites, isSatDown, isGatewayDown, buildStep, simulateVariant,
-    findVulnerableSatellites, autoTuneConfig
+    findVulnerableSatellites, autoTuneConfig, configToScenario
   };
   root.Simulation = Simulation;
   if (typeof module !== 'undefined' && module.exports) module.exports = Simulation;

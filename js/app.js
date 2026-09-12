@@ -4,7 +4,7 @@
   const Routing = window.Routing;
   const Simulation = window.Simulation;
   const Validate = window.Validate;
-  const { DEFAULT_CONFIG, PLANE_COLORS, generateSatellites, buildStep, simulateVariant, findVulnerableSatellites, autoTuneConfig } = Simulation;
+  const { DEFAULT_CONFIG, PLANE_COLORS, generateSatellites, buildStep, simulateVariant, findVulnerableSatellites, autoTuneConfig, configToScenario } = Simulation;
   const { computeRoute, REASON_TEXT } = Routing;
   const { validateScenario } = Validate;
   const d2r = Geometry.d2r;
@@ -61,12 +61,17 @@
       document.getElementById('fileMsg').innerHTML = `<div class="msg err">Не удалось прочитать файл. Проверьте, что он не повреждён, и попробуйте снова.</div>`;
     };
     reader.onload = e => {
-      let obj;
-      try { obj = JSON.parse(e.target.result); }
+      let raw;
+      try { raw = JSON.parse(e.target.result); }
       catch (err) {
         document.getElementById('fileMsg').innerHTML = `<div class="msg err">Не удалось прочитать JSON: ${err.message}</div>`;
         return;
       }
+      // Принимаем как файл-сценарий, так и наш экспорт результатов ({name, config, metrics}) —
+      // это замыкает цикл «выгрузить вариант → загрузить обратно» из ТЗ.
+      const obj = (raw && raw.config && raw.config.groundStations && !raw.ground_stations)
+        ? configToScenario(raw.config, raw.name)
+        : raw;
       const errors = validateScenario(obj);
       if (errors.length) {
         document.getElementById('fileMsg').innerHTML =
@@ -76,7 +81,7 @@
       draft = {
         ...DEFAULT_CONFIG(),
         groundStations: obj.ground_stations.map(g => ({ name: g.name, lat: g.lat, lon: g.lon, gateway: !!g.gateway })),
-        customPlanes: obj.planes.map((p, i) => ({ id: i + 1, raan: p.raan, inclination: p.inclination, satellites: p.satellites, phase_offset: p.phase_offset || 0 })),
+        customPlanes: obj.planes.map((p, i) => ({ id: (p.id != null ? p.id : i + 1), raan: p.raan, inclination: p.inclination, satellites: p.satellites, phase_offset: p.phase_offset || 0 })),
         islMaxRangeKm: obj.isl_max_range_km ?? 3000,
         minElevationDeg: obj.min_elevation_deg ?? 10,
         durationHours: Math.min(72, obj.duration_hours ?? 24),
@@ -131,6 +136,8 @@
     document.getElementById('islVal').textContent = draft.islMaxRangeKm + ' км';
     document.getElementById('elevRange').value = draft.minElevationDeg;
     document.getElementById('elevVal').textContent = draft.minElevationDeg + '°';
+    document.getElementById('durationInput').value = draft.durationHours;
+    document.getElementById('stepInput').value = draft.stepSeconds;
 
     const satSel = document.getElementById('outageSatSelect');
     const sats = generateSatellites(draft);
@@ -147,6 +154,8 @@
   window.setPhaseOffset = function setPhaseOffset(i, v) { draft.phaseOffset[i] = Number(v); renderConfigForm(); };
   window.onIslChange = function onIslChange(v) { draft.islMaxRangeKm = Number(v); document.getElementById('islVal').textContent = v + ' км'; };
   window.onElevChange = function onElevChange(v) { draft.minElevationDeg = Number(v); document.getElementById('elevVal').textContent = v + '°'; };
+  window.onDurationChange = function onDurationChange(v) { const n = Number(v); if (Number.isFinite(n) && n > 0) draft.durationHours = Math.min(72, n); };
+  window.onStepChange = function onStepChange(v) { const n = Number(v); if (Number.isFinite(n) && n >= 30) draft.stepSeconds = n; };
 
   window.addSatOutage = function addSatOutage() {
     const satId = document.getElementById('outageSatSelect').value;
@@ -219,7 +228,8 @@
         <div class="stat">Средняя доступность: <b>${v.metrics.overallAvailability.toFixed(1)}%</b> · ${badge}</div>
         <div class="btns">
           <button class="small" onclick="showVariant('${v.id}')">Показать на карте</button>
-          <button class="small" onclick="exportVariant('${v.id}')">Экспорт JSON</button>
+          <button class="small" onclick="exportScenario('${v.id}')" title="Формат, который можно загрузить обратно">Сценарий .json</button>
+          <button class="small" onclick="exportVariant('${v.id}')" title="Конфигурация + рассчитанные метрики">Результаты .json</button>
           <button class="small danger" onclick="deleteVariant('${v.id}')">Удалить</button>
         </div>
       </div>`;
@@ -239,13 +249,28 @@
     if (activeVariantId === id) { activeVariantId = variants.length ? variants[0].id : null; currentStep = 0; }
     renderVariants(); renderGsSelect(); renderGantt(); update(); renderCompare();
   };
-  window.exportVariant = function exportVariant(id) {
-    const v = variants.find(x => x.id === id);
-    const blob = new Blob([JSON.stringify({ name: v.name, config: v.config, metrics: v.metrics }, null, 2)], { type: 'application/json' });
+  function downloadJson(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${v.name.replace(/\s+/g, '_')}.json`;
+    a.download = filename;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  // Экспорт результатов: конфигурация во внутреннем виде + рассчитанные метрики (для отчёта).
+  window.exportVariant = function exportVariant(id) {
+    const v = variants.find(x => x.id === id);
+    downloadJson({ name: v.name, config: v.config, metrics: v.metrics }, `${v.name.replace(/\s+/g, '_')}_результаты.json`);
+  };
+  // Экспорт сценария: формат файла-сценария, который загружается обратно через форму.
+  window.exportScenario = function exportScenario(id) {
+    const v = variants.find(x => x.id === id);
+    downloadJson(configToScenario(v.config, v.name), `${v.name.replace(/\s+/g, '_')}_сценарий.json`);
+  };
+  // Выгрузка текущей (ещё не рассчитанной) конфигурации — для сценария «изменил → выгрузил → загрузил».
+  window.exportDraftScenario = function exportDraftScenario() {
+    const nm = (document.getElementById('variantName').value.trim()) || 'Текущий сценарий';
+    downloadJson(configToScenario(draft, nm), `${nm.replace(/\s+/g, '_')}_сценарий.json`);
   };
   window.onCompareToggle = function onCompareToggle() { renderCompare(); };
 
@@ -310,12 +335,14 @@
   }
 
   let hitTargets = [];
+  let satHitTargets = [];
   function drawMap() {
     const canvas = document.getElementById('mapCanvas');
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2, Rmax = 280;
     ctx.clearRect(0, 0, W, H);
     hitTargets = [];
+    satHitTargets = [];
 
     const v = activeVariant();
     ctx.strokeStyle = 'rgba(143,161,189,0.18)';
@@ -352,12 +379,14 @@
     }
 
     let route = null;
+    const routeSet = new Set();
     if (selectedGs) route = computeRoute(selectedGs, step, v.config);
     if (route && route.ok) {
       const gs = v.config.groundStations.find(g => g.name === selectedGs);
       const gw = v.config.groundStations.find(g => g.gateway);
       const pts = [projectPolar(gs.lat, gs.lon, cx, cy, Rmax)];
       for (const nodeId of route.path.slice(1, -1)) {
+        routeSet.add(nodeId);
         const sp = step.satPos[nodeId];
         pts.push(projectPolar(sp.lat, sp.lon, cx, cy, Rmax));
       }
@@ -368,12 +397,35 @@
       ctx.stroke();
     }
 
+    // Спутники, находящиеся в отказе (нет в satPos), рисуем приглушённо — чтобы было видно
+    // «аппарат и его состояние», как требует ТЗ, а не просто исчезновение точки.
+    for (const sat of generateSatellites(v.config)) {
+      if (step.satPos[sat.id]) continue; // активные нарисуем ниже
+      const eci = Geometry.satECI(sat, tSec);
+      const geo = Geometry.ecefToGeodetic(Geometry.eciToEcef(eci, tSec));
+      const p = projectPolar(geo.lat, geo.lon, cx, cy, Rmax);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(143,161,189,0.28)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(229,99,122,0.7)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x - 3, p.y - 3); ctx.lineTo(p.x + 3, p.y + 3);
+      ctx.moveTo(p.x + 3, p.y - 3); ctx.lineTo(p.x - 3, p.y + 3); ctx.stroke();
+      satHitTargets.push({ x: p.x, y: p.y, id: sat.id, plane: sat.plane, down: true });
+    }
+
+    // Активные спутники; на маршруте — крупнее, с белым кольцом и подписью id.
     for (const id in step.satPos) {
       const s = step.satPos[id];
       const p = projectPolar(s.lat, s.lon, cx, cy, Rmax);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
+      const onRoute = routeSet.has(id);
+      ctx.beginPath(); ctx.arc(p.x, p.y, onRoute ? 5 : 3.2, 0, Math.PI * 2);
       ctx.fillStyle = PLANE_COLORS[s.plane] || '#999';
       ctx.fill();
+      if (onRoute) {
+        ctx.strokeStyle = '#E7EDF5'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#E7EDF5'; ctx.font = '10px ui-monospace,monospace';
+        ctx.fillText(id, p.x + 7, p.y - 6);
+      }
+      satHitTargets.push({ x: p.x, y: p.y, id, plane: s.plane, down: false, onRoute });
     }
 
     for (const gs of v.config.groundStations) {
@@ -404,24 +456,69 @@
       <div class="item"><span class="dot" style="background:${PLANE_COLORS[3]}"></span>Плоскость 3</div>
       <div class="item"><span class="line" style="background:rgba(73,211,222,0.6)"></span>Связь МСС</div>
       <div class="item"><span class="line" style="background:#57D68D;height:3px"></span>Активный маршрут</div>
+      <div class="item"><span class="dot" style="background:rgba(143,161,189,0.35);border:1px solid rgba(229,99,122,0.7)"></span>КА в отказе</div>
       <div class="item"><span class="dot" style="background:#57D68D;border-radius:2px"></span>Пункт: связь есть</div>
       <div class="item"><span class="dot" style="background:#E5637A;border-radius:2px"></span>Пункт: связи нет</div>
       <div class="item"><span class="dot" style="background:#F2A93B;border-radius:50% 50% 0 50%;transform:rotate(45deg)"></span>Шлюз</div>
+      <div class="hint" style="margin-top:4px">Наведите курсор на спутник — покажется его номер и состояние. Клик по спутнику — выбрать его для задания отказа.</div>
     `;
   }
 
-  document.getElementById('mapCanvas').addEventListener('click', e => {
+  function canvasPoint(e) {
     const rect = e.target.getBoundingClientRect();
     const scaleX = e.target.width / rect.width, scaleY = e.target.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX, y = (e.clientY - rect.top) * scaleY;
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  }
+  function nearest(targets, x, y) {
     let best = null, bd = Infinity;
-    for (const t of hitTargets) {
-      if (t.gateway) continue;
-      const d = Math.hypot(t.x - x, t.y - y);
-      if (d < bd) { bd = d; best = t; }
+    for (const t of targets) { const d = Math.hypot(t.x - x, t.y - y); if (d < bd) { bd = d; best = t; } }
+    return { best, bd };
+  }
+
+  document.getElementById('mapCanvas').addEventListener('click', e => {
+    const { x, y } = canvasPoint(e);
+    const gsHit = nearest(hitTargets.filter(t => !t.gateway), x, y);
+    const satHit = nearest(satHitTargets, x, y);
+    // Что ближе к курсору — тем и управляем. Спутник → выбираем его для задания отказа.
+    if (satHit.best && satHit.bd < 14 && (!gsHit.best || satHit.bd < gsHit.bd)) {
+      selectOutageSat(satHit.best.id);
+      return;
     }
-    if (best && bd < 20) { selectedGs = best.name; renderGsSelect(); update(); }
+    if (gsHit.best && gsHit.bd < 20) { selectedGs = gsHit.best.name; renderGsSelect(); update(); }
   });
+
+  const tooltip = document.getElementById('mapTooltip');
+  document.getElementById('mapCanvas').addEventListener('mousemove', e => {
+    const { x, y } = canvasPoint(e);
+    const satHit = nearest(satHitTargets, x, y);
+    if (satHit.best && satHit.bd < 14) {
+      const s = satHit.best;
+      const state = s.down ? 'в отказе' : (s.onRoute ? 'на активном маршруте' : 'активен');
+      tooltip.innerHTML = `<b>${s.id}</b> · плоскость ${s.plane}<br>${state}`;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.offsetX + 12) + 'px';
+      tooltip.style.top = (e.offsetY + 12) + 'px';
+      e.target.style.cursor = 'pointer';
+    } else {
+      const gsHit = nearest(hitTargets.filter(t => !t.gateway), x, y);
+      tooltip.style.display = 'none';
+      e.target.style.cursor = (gsHit.best && gsHit.bd < 20) ? 'pointer' : 'default';
+    }
+  });
+  document.getElementById('mapCanvas').addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+  // Выбирает спутник в списке отказов и подсвечивает форму — закрывает сценарий проверки
+  // «выбрать спутник текущего маршрута, задать период его недоступности».
+  function selectOutageSat(satId) {
+    const sel = document.getElementById('outageSatSelect');
+    if ([...sel.options].some(o => o.value === satId)) {
+      sel.value = satId;
+      const panel = document.getElementById('outagePanel');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      panel.classList.add('flash');
+      setTimeout(() => panel.classList.remove('flash'), 900);
+    }
+  }
 
   /* ======================= ВЫБОР ПУНКТА / ПАНЕЛЬ ======================= */
   function renderGsSelect() {
@@ -522,12 +619,41 @@
   }
 
   /* ======================= СРАВНЕНИЕ ВАРИАНТОВ ======================= */
+  function configSummary(config) {
+    const sats = generateSatellites(config);
+    const planesCount = config.customPlanes ? config.customPlanes.length : config.activePlanes.length;
+    return [
+      ['Спутников в группировке', String(sats.length)],
+      ['Орбитальных плоскостей', String(planesCount)],
+      ['RAAN-смещение, °', config.customPlanes ? 'задано файлом' : config.raanOffset.join(' / ')],
+      ['Фазирование, °', config.customPlanes ? 'задано файлом' : config.phaseOffset.join(' / ')],
+      ['Дальность МСС, км', String(config.islMaxRangeKm)],
+      ['Порог угла места, °', String(config.minElevationDeg)],
+      ['Длительность, ч', String(config.durationHours)],
+      ['Шаг расчёта, с', String(config.stepSeconds)],
+      ['Задано периодов отказов', String((config.outages || []).length)]
+    ];
+  }
+
   function renderCompare() {
     const checked = [...document.querySelectorAll('[data-compare]')].filter(c => c.checked).map(c => c.dataset.compare);
     const el = document.getElementById('compareArea');
     if (checked.length < 2) { el.innerHTML = '<div class="placeholder">Отметьте два и более варианта в списке слева галочкой «в сравнение», чтобы увидеть сопоставление.</div>'; return; }
     const vs = checked.map(id => variants.find(v => v.id === id));
     const allGs = [...new Set(vs.flatMap(v => Object.keys(v.metrics.perGs)))];
+
+    // Таблица «изменённых параметров»: строки с различающимися значениями подсвечиваются.
+    const summaries = vs.map(v => configSummary(v.config));
+    const paramLabels = summaries[0].map(r => r[0]);
+    let paramRows = '';
+    paramLabels.forEach((label, ri) => {
+      const cells = summaries.map(s => s[ri][1]);
+      const differs = cells.some(c => c !== cells[0]);
+      paramRows += `<tr>${`<td>${escapeHtml(label)}</td>`}` +
+        cells.map(c => `<td class="num ${differs ? 'diff' : ''}">${escapeHtml(c)}</td>`).join('') + '</tr>';
+    });
+    const paramHead = '<tr><th>Параметр</th>' + vs.map(v => `<th>${escapeHtml(v.name)}</th>`).join('') + '</tr>';
+    const paramTable = `<h3>Параметры конфигурации <span class="hint" style="font-weight:400">(отличия подсвечены)</span></h3><table>${paramHead}${paramRows}</table>`;
 
     let head = '<tr><th>Пункт</th>' + vs.map(v => `<th>${escapeHtml(v.name)}</th>`).join('') + '</tr>';
     let rows = '';
@@ -549,13 +675,15 @@
       ` Наименьшую доступность (${worst.metrics.overallAvailability.toFixed(1)}%) показал вариант «${escapeHtml(worst.name)}».` +
       (anyMeets ? '' : ' Ни один из сравниваемых вариантов пока не обеспечивает 90% для всех пунктов — рассмотрите увеличение числа развёрнутых плоскостей, дальности МСС или снижение порога угла места.');
 
-    el.innerHTML = `<table>${head}${rows}</table><div class="recommendation">${rec}</div>`;
+    el.innerHTML = `${paramTable}<h3 style="margin-top:14px">Показатели доступности</h3><table>${head}${rows}</table><div class="recommendation">${rec}</div>`;
   }
 
   /* ======================= ОБНОВЛЕНИЕ ======================= */
   function update() {
-    document.getElementById('timeSlider').value = currentStep;
+    const slider = document.getElementById('timeSlider');
     const v = activeVariant();
+    if (v) slider.max = Math.max(1, v.metrics.totalSteps - 1); // диапазон зависит от длительности/шага
+    slider.value = currentStep;
     const stepSec = v ? v.config.stepSeconds : 120;
     document.getElementById('timeLabel').textContent = formatTime(currentStep * stepSec);
     drawMap();

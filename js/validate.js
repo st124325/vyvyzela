@@ -25,6 +25,7 @@
         if (!isFiniteNumber(p.inclination)) errors.push(`planes[${i}]: отсутствует числовое поле "inclination".`);
         if (!isFiniteNumber(p.satellites) || p.satellites < 1) errors.push(`planes[${i}]: "satellites" должно быть положительным числом.`);
         if (p.phase_offset !== undefined && !isFiniteNumber(p.phase_offset)) errors.push(`planes[${i}]: "phase_offset" должно быть числом.`);
+        if (p.id !== undefined && (!isFiniteNumber(p.id) || p.id < 1)) errors.push(`planes[${i}]: "id" (необязательное) должно быть положительным числом.`);
       });
     }
 

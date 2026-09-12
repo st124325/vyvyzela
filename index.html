@@ -50,9 +50,24 @@
 
         <label>Мин. угол места для видимости пункта <span class="sliderVal" id="elevVal"></span></label>
         <input type="range" id="elevRange" min="0" max="30" step="0.5" oninput="onElevChange(this.value)">
+
+        <fieldset style="margin-top:10px">
+          <legend>Параметры расчёта</legend>
+          <div class="row">
+            <div>
+              <label>Длительность, ч</label>
+              <input type="number" id="durationInput" min="1" max="72" step="1" onchange="onDurationChange(this.value)">
+            </div>
+            <div>
+              <label>Шаг, с</label>
+              <input type="number" id="stepInput" min="30" max="600" step="10" onchange="onStepChange(this.value)">
+            </div>
+          </div>
+          <div class="hint">По условию кейса — сутки, шаг 120 с. Меняйте для проверки на других периодах.</div>
+        </fieldset>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="outagePanel">
         <h2>Периоды недоступности</h2>
         <label>Спутник</label>
         <select id="outageSatSelect"></select>
@@ -86,6 +101,7 @@
           <button class="primary" onclick="runCalculation()">Рассчитать вариант</button>
           <button onclick="resetDraft()">Сбросить</button>
         </div>
+        <button style="width:100%;margin-top:8px" onclick="exportDraftScenario()" title="Выгрузить текущую конфигурацию как файл-сценарий (загружается обратно)">Выгрузить текущий сценарий (.json)</button>
         <div id="calcMsg"></div>
       </section>
 
@@ -110,7 +126,10 @@
       <section class="panel">
         <h2>Состояние сети</h2>
         <div class="mapWrap">
-          <canvas id="mapCanvas" width="640" height="640"></canvas>
+          <div class="canvasHolder">
+            <canvas id="mapCanvas" width="640" height="640"></canvas>
+            <div id="mapTooltip" class="mapTooltip"></div>
+          </div>
           <div class="legend" id="legend"></div>
         </div>
         <div class="timelineBar" style="margin-top:12px">
