@@ -124,7 +124,13 @@
     <main class="main">
 
       <section class="panel">
-        <h2>Состояние сети</h2>
+        <div class="compareHead">
+          <h2 style="margin:0">Состояние сети</h2>
+          <div class="segmented">
+            <button id="modeMap" class="sel" onclick="setMapMode('map')">Карта</button>
+            <button id="modeGrid" onclick="setMapMode('grid')">Схема</button>
+          </div>
+        </div>
         <div class="mapWrap">
           <div class="canvasHolder">
             <canvas id="mapCanvas" width="640" height="640"></canvas>
@@ -163,6 +169,7 @@
 </div>
 
 <script src="js/geometry.js"></script>
+<script src="js/coastlines.js"></script>
 <script src="js/routing.js"></script>
 <script src="js/simulation.js"></script>
 <script src="js/validate.js"></script>

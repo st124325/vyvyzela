@@ -17,7 +17,11 @@
   let currentStep = 0;
   let selectedGs = null;
   let playing = false;
-  let playTimer = null;
+  let rafId = null;
+  let lastTs = null;
+  let simSeconds = 0;
+  let mapMode = 'map'; // 'map' — континенты, 'grid' — схема с сеткой
+  const PLAY_DURATION_S = 45; // за столько секунд проигрываются полные расчётные сутки
 
   /* ======================= ПРЕСЕТЫ ======================= */
   window.applyPreset = function applyPreset(key) {
@@ -334,19 +338,11 @@
     return { x: cx + rho * Math.cos(theta), y: cy + rho * Math.sin(theta) };
   }
 
-  let hitTargets = [];
-  let satHitTargets = [];
-  function drawMap() {
-    const canvas = document.getElementById('mapCanvas');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2, Rmax = 280;
-    ctx.clearRect(0, 0, W, H);
-    hitTargets = [];
-    satHitTargets = [];
-
-    const v = activeVariant();
-    ctx.strokeStyle = 'rgba(143,161,189,0.18)';
-    ctx.fillStyle = 'rgba(143,161,189,0.5)';
+  // Полярная азимутальная проекция: центр — Северный полюс, экватор на половине радиуса.
+  function drawGraticule(ctx, cx, cy, Rmax, faint) {
+    ctx.strokeStyle = faint ? 'rgba(150,150,150,0.12)' : 'rgba(150,150,150,0.20)';
+    ctx.fillStyle = faint ? 'rgba(180,180,180,0.35)' : 'rgba(180,180,180,0.55)';
+    ctx.lineWidth = 1;
     ctx.font = '10px ui-monospace,monospace';
     [80, 60, 40, 20, 0].forEach(lat => {
       const rho = (90 - lat) / 180 * Rmax;
@@ -357,9 +353,58 @@
       const p1 = projectPolar(90, lon, cx, cy, Rmax), p2 = projectPolar(-5, lon, cx, cy, Rmax);
       ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
     }
+  }
+
+  function drawEarth(ctx, cx, cy, Rmax) {
+    if (mapMode !== 'map') { drawGraticule(ctx, cx, cy, Rmax, false); return; }
+    // Океан-диск с мягким градиентом.
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, Rmax, 0, Math.PI * 2); ctx.clip();
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Rmax);
+    g.addColorStop(0, '#15304f');
+    g.addColorStop(0.6, '#102844');
+    g.addColorStop(1, '#0b1a2e');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - Rmax, cy - Rmax, Rmax * 2, Rmax * 2);
+    // Континенты.
+    const coast = window.COASTLINES || [];
+    ctx.lineJoin = 'round';
+    for (const ring of coast) {
+      ctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const p = projectPolar(ring[i][1], ring[i][0], cx, cy, Rmax);
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(58,82,58,0.55)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(120,168,128,0.55)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+    ctx.restore();
+    // Внешний ободок диска.
+    ctx.beginPath(); ctx.arc(cx, cy, Rmax, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(120,150,190,0.25)'; ctx.lineWidth = 1; ctx.stroke();
+    drawGraticule(ctx, cx, cy, Rmax, true);
+  }
+
+  let hitTargets = [];
+  let satHitTargets = [];
+  function drawMap(tSecOverride) {
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2, Rmax = 280;
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    hitTargets = [];
+    satHitTargets = [];
+
+    const v = activeVariant();
+    drawEarth(ctx, cx, cy, Rmax);
 
     if (!v) {
-      ctx.fillStyle = 'rgba(143,161,189,0.7)';
+      ctx.fillStyle = 'rgba(180,180,180,0.7)';
       ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('Выполните расчёт варианта, чтобы увидеть сеть', cx, cy);
@@ -367,7 +412,7 @@
       return;
     }
 
-    const tSec = currentStep * v.config.stepSeconds;
+    const tSec = (tSecOverride != null) ? tSecOverride : currentStep * v.config.stepSeconds;
     const step = buildStep(v.config, tSec);
 
     ctx.strokeStyle = 'rgba(73,211,222,0.28)';
@@ -568,19 +613,48 @@
     return hh + ':' + mm;
   }
   window.onTimeChange = function onTimeChange(v) { currentStep = Number(v); update(); };
+  window.setMapMode = function setMapMode(mode) {
+    mapMode = mode;
+    document.getElementById('modeMap').classList.toggle('sel', mode === 'map');
+    document.getElementById('modeGrid').classList.toggle('sel', mode === 'grid');
+    drawMap();
+  };
   window.togglePlay = function togglePlay() {
     const v = activeVariant();
     if (!v) return;
     playing = !playing;
     document.getElementById('playBtn').textContent = playing ? '⏸' : '▶';
     if (playing) {
-      playTimer = setInterval(() => {
-        currentStep = (currentStep + 1) % v.metrics.totalSteps;
-        document.getElementById('timeSlider').value = currentStep;
-        update();
-      }, 140);
-    } else clearInterval(playTimer);
+      lastTs = null;
+      simSeconds = currentStep * v.config.stepSeconds;
+      rafId = requestAnimationFrame(playLoop);
+    } else if (rafId) {
+      cancelAnimationFrame(rafId);
+    }
   };
+  // Плавное проигрывание: спутники двигаются непрерывно (rAF), а дискретный шаг обновляется
+  // только для курсора Ганта и панели пункта — так анимация гладкая, а метрики согласованы.
+  function playLoop(ts) {
+    if (!playing) return;
+    const v = activeVariant();
+    if (!v) { playing = false; return; }
+    if (lastTs === null) lastTs = ts;
+    const dt = (ts - lastTs) / 1000; lastTs = ts;
+    const total = v.metrics.totalSteps, stepSec = v.config.stepSeconds;
+    const totalSim = total * stepSec;
+    const speed = totalSim / PLAY_DURATION_S;
+    simSeconds = (simSeconds + dt * speed) % totalSim;
+    drawMap(simSeconds);
+    document.getElementById('timeLabel').textContent = formatTime(simSeconds);
+    const newStep = Math.floor(simSeconds / stepSec) % total;
+    if (newStep !== currentStep) {
+      currentStep = newStep;
+      document.getElementById('timeSlider').value = currentStep;
+      updateGanttCursor();
+      renderGsPanel();
+    }
+    rafId = requestAnimationFrame(playLoop);
+  }
 
   /* ======================= ДИАГРАММА ДОСТУПНОСТИ (ГАНТ) ======================= */
   function renderGantt() {
