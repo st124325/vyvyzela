@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мониторинг природных пожаров</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>Мониторинг природных пожаров по данным ДЗЗ</h1>
+  <span id="catalog-info" class="muted">каталог загружается…</span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Пространственно-временной запрос</h2>
+
+    <fieldset>
+      <legend>Территория</legend>
+      <div class="grid">
+        <label>мин. долгота<input id="min-lon" type="number" step="0.0001"></label>
+        <label>мин. широта<input id="min-lat" type="number" step="0.0001"></label>
+        <label>макс. долгота<input id="max-lon" type="number" step="0.0001"></label>
+        <label>макс. широта<input id="max-lat" type="number" step="0.0001"></label>
+      </div>
+      <p class="hint">Прямоугольник можно обвести на карте с зажатой клавишей Shift.</p>
+      <label class="inline">Полигон GeoJSON (необязательно)
+        <textarea id="polygon" rows="3" placeholder='{"type":"Polygon","coordinates":[[[…]]]}'></textarea>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Период</legend>
+      <div class="grid">
+        <label>с<input id="date-from" type="date"></label>
+        <label>по<input id="date-to" type="date"></label>
+      </div>
+      <label class="checkbox"><input id="clip" type="checkbox" checked> обрезать контуры границей запроса</label>
+    </fieldset>
+
+    <div class="actions">
+      <button id="run" class="primary">Выполнить запрос</button>
+      <button id="reset">Сбросить</button>
+    </div>
+
+    <h2>Аналитическая справка</h2>
+    <table id="summary">
+      <thead><tr><th>Степень поражения</th><th>Площадь, га</th><th>Доля, %</th></tr></thead>
+      <tbody><tr><td colspan="3" class="muted">запрос не выполнялся</td></tr></tbody>
+    </table>
+    <p id="totals" class="muted"></p>
+
+    <div class="actions">
+      <button id="download-geojson">Контуры GeoJSON</button>
+      <button id="download-csv">Справка CSV</button>
+      <button id="download-json">Справка JSON</button>
+    </div>
+    <p class="hint">Тот же результат доступен без интерфейса:
+      <code>GET /api/burn-scars</code>, <code>GET /api/summary</code>, <code>POST /api/query</code>.</p>
+  </section>
+
+  <section class="map-area">
+    <div id="map"></div>
+    <div id="legend">
+      <span><i class="dot hotspot"></i>термоточка</span>
+      <span><i class="box sev1"></i>слабая</span>
+      <span><i class="box sev2"></i>средняя</span>
+      <span><i class="box sev3"></i>сильная</span>
+    </div>
+    <p id="status" class="muted"></p>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" onerror="window.leafletFailed = true"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
