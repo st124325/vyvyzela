@@ -9,22 +9,22 @@ data:
   # роль файла определяется по суффиксу имени (после chip_id).
   raster_extensions: [".tif", ".tiff", ".npy", ".npz"]
   af_roles:
-    main: ["", "_af", "_viirs", "_img", "_bands"]     # I1..I5
+    main: ["", "_af", "_viirs", "_img", "_bands", "_viirs_i1-i5"]     # I1..I5
     aux: ["_aux", "_extra", "_static", "_ancillary"]  # landcover, dem, углы, метео, valid
   bs_roles:
-    pre: ["_pre", "_s2_pre", "_s2pre", "_optical_pre"]
-    post: ["_post", "_s2_post", "_s2post", "_optical_post"]
-    s1_pre: ["_s1_pre", "_s1pre", "_sar_pre"]
-    s1_post: ["_s1_post", "_s1post", "_sar_post"]
+    pre: ["_pre", "_s2_pre", "_s2pre", "_optical_pre", "_sentinel-2_pre"]
+    post: ["_post", "_s2_post", "_s2post", "_optical_post", "_sentinel-2_post"]
+    s1_pre: ["_s1_pre", "_s1pre", "_sar_pre", "_sentinel-1_pre"]
+    s1_post: ["_s1_post", "_s1post", "_sar_post", "_sentinel-1_post"]
     aux: ["_aux", "_extra", "_static", "_ancillary"]
   # Порядок каналов в файлах (индексация с 0), согласно постановке кейса.
-  af_bands: {i1: 0, i2: 1, i3: 2, i4: 3, i5: 4}
+  af_bands: {i1: 0, i2: 1, i3: 2, i4: 3, i5: 4, solar_zenith: 5, sensor_zenith: 6, valid: 7}
   s2_bands: {b2: 0, b3: 1, b4: 2, b5: 3, b6: 4, b7: 5, b8a: 6, b11: 7, b12: 8, scl: 9}
   s1_bands: {vv: 0, vh: 1}
   # Каналы вспомогательного файла. Имена ищутся по описанию слоёв; если во
   # вспомогательном растре порядок другой, достаточно поправить этот блок.
-  af_aux_bands: {landcover: 0, dem: 1, solar_zenith: 2, sensor_zenith: 3, t2m: 4, rh: 5, wind: 6, valid: 7}
-  bs_aux_bands: {dem: 0, slope: 1, aspect: 2, landcover: 3}
+  af_aux_bands: {landcover: 0, dem: 1, t2m: 2, rh: 3, wind: 4}
+  bs_aux_bands: {dem: 0, slope: 1, landcover: 2}
   s2_scale: 10000.0   # L2A отражение хранится как uint16 ×10000
   s1_scale: 100.0     # sigma0 в дБ хранится как int16 ×100
 
@@ -78,12 +78,15 @@ burn_severity:
     crop: [40]
     wetland: [90, 95]
     other: [60, 70]
+  # Пороги калиброваны по факту размеченных гарей train-набора
+  # (train.py --calibrate-thresholds, см. docs/REPORT.md, раздел 5.2).
+  # На пашне калибровка дала немонотонные пороги — оставлено значение постановки.
   thresholds:
-    forest:  {t1: 0.100, t2: 0.270, t3: 0.660}
-    grass:   {t1: 0.062, t2: 0.204, t3: 0.386}
+    forest:  {t1: 0.1759, t2: 0.3113, t3: 0.5669}
+    grass:   {t1: 0.1699, t2: 0.2338, t3: 0.4083}
     crop:    {t1: 0.070, t2: 0.177, t3: 0.380}
-    wetland: {t1: 0.075, t2: 0.331, t3: 0.677}
-    other:   {t1: 0.080, t2: 0.250, t3: 0.500}
+    wetland: {t1: 0.182, t2: 0.3589, t3: 0.641}
+    other:   {t1: 0.1309, t2: 0.3006, t3: 0.4215}
     default: {t1: 0.080, t2: 0.250, t3: 0.500}
   # Подтверждение контура: гарь обязана показать падение NIR и рост SWIR,
   # иначе это фенология (уборка, вспашка) или ошибка атмосферной коррекции.

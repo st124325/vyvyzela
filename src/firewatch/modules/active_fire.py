@@ -75,12 +75,18 @@ def compute_features(chip: Chip, config: Config) -> dict[str, np.ndarray]:
     i3 = _layer(chip, "main", band_map, "i3", fallback=np.nan)
 
     landcover = _layer(chip, "aux", aux_map, "landcover", fallback=0.0)
-    solar_zenith = _layer(chip, "aux", aux_map, "solar_zenith", fallback=np.nan)
     dem = _layer(chip, "aux", aux_map, "dem", fallback=0.0)
     t2m = _layer(chip, "aux", aux_map, "t2m", fallback=np.nan)
     rh = _layer(chip, "aux", aux_map, "rh", fallback=np.nan)
     wind = _layer(chip, "aux", aux_map, "wind", fallback=np.nan)
+    # solar_zenith и valid могут лежать в aux-файле или прямо в основном VIIRS-растре
+    # (после I1..I5) — зависит от релиза; пробуем оба места.
+    solar_zenith = _layer(chip, "aux", aux_map, "solar_zenith")
+    if solar_zenith is None:
+        solar_zenith = _layer(chip, "main", band_map, "solar_zenith", fallback=np.nan)
     valid_layer = _layer(chip, "aux", aux_map, "valid")
+    if valid_layer is None:
+        valid_layer = _layer(chip, "main", band_map, "valid")
 
     valid = np.isfinite(i4) & np.isfinite(i5) & (i4 > 0) & (i5 > 0)
     if valid_layer is not None:
@@ -174,7 +180,8 @@ def _rule_decision(features: dict[str, np.ndarray], config: Config) -> np.ndarra
     # --- источники ложных срабатываний -------------------------------------
     # 1. Техногенные термоаномалии: факелы и промплощадки лежат на застройке.
     technogenic_classes = set(int(c) for c in reject["technogenic_landcover"])
-    builtup = np.isin(features["landcover"].astype(np.int32), list(technogenic_classes))
+    landcover_int = np.nan_to_num(features["landcover"], nan=-1.0).astype(np.int32)
+    builtup = np.isin(landcover_int, list(technogenic_classes))
     detection &= ~dilate(builtup, int(reject["builtup_dilate"]))
 
     # 2. Солнечный блик: высокое SWIR-отражение при дневной съёмке.
@@ -196,8 +203,7 @@ def _rule_decision(features: dict[str, np.ndarray], config: Config) -> np.ndarra
 
     # 6. Нагретый грунт, карьер, вспаханное поле: на этих классах покрова
     #    требуем дополнительный запас по разности каналов.
-    suspicious = np.isin(features["landcover"].astype(np.int32),
-                         [int(c) for c in reject["suspicious_landcover"]])
+    suspicious = np.isin(landcover_int, [int(c) for c in reject["suspicious_landcover"]])
     strict = features["dt_excess"] > dt_margin + float(reject["suspicious_dt_margin"])
     detection &= ~(suspicious & ~strict & ~absolute)
 

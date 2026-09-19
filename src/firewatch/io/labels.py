@@ -19,11 +19,15 @@ MASK_SUFFIXES = ("_mask", "_label", "_target", "_gt")
 
 
 def find_mask_file(root: Path, chip_id: str) -> Path | None:
+    extensions = (".tif", ".tiff", ".npy", ".npz")
+    candidates = [p for p in root.rglob(f"{chip_id}*") if p.is_file() and p.suffix.lower() in extensions]
     for suffix in MASK_SUFFIXES:
-        for extension in (".tif", ".tiff", ".npy", ".npz"):
-            matches = sorted(root.rglob(f"{chip_id}{suffix}{extension}"))
-            if matches:
-                return matches[0]
+        matches = sorted(
+            p for p in candidates
+            if p.stem[len(chip_id):].lower() == suffix
+        )
+        if matches:
+            return matches[0]
     return None
 
 
