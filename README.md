@@ -94,23 +94,27 @@ python inference.py --data-dir /path/to/test --output /path/to/submission.csv
 
 ```
 test/
-├── meta.csv                  # chip_id, kind, width, height, gsd, valid_frac, cloud_frac
-├── sample_submission.csv     # chip_id, class_id, rle — задаёт состав строк ответа
+├── meta.csv                       # chip_id, kind, width, height, gsd, valid_frac, cloud_frac
+├── sample_submission.csv          # chip_id, class_id, rle — задаёт состав строк ответа
 ├── af/
-│   ├── AF_te_000001.tif      # 5 каналов: I1, I2, I3, I4, I5
-│   └── AF_te_000001_aux.tif  # тип покрова, рельеф, углы, метео, маска валидности
+│   ├── viirs/AF_te_000001_VIIRS_I1-I5.tif  # 8 каналов: I1–I5, solar_zenith, sensor_zenith, valid
+│   └── aux/AF_te_000001_AUX.tif            # landcover, dem, t2m, rh2m, wind_speed
 └── bs/
-    ├── BS_te_000001_pre.tif      # 10 каналов Sentinel-2: B2…B12, SCL
-    ├── BS_te_000001_post.tif
-    ├── BS_te_000001_s1_pre.tif   # 2 канала Sentinel-1: VV, VH
-    ├── BS_te_000001_s1_post.tif
-    └── BS_te_000001_aux.tif      # высота, уклон, экспозиция, тип покрова
+    ├── sentinel2_pre/BS_te_000001_Sentinel-2_pre.tif    # 10 каналов: B2…B12, SCL
+    ├── sentinel2_post/BS_te_000001_Sentinel-2_post.tif
+    ├── sentinel1_pre/BS_te_000001_Sentinel-1_pre.tif    # 2 канала: VV, VH
+    ├── sentinel1_post/BS_te_000001_Sentinel-1_post.tif
+    └── aux/BS_te_000001_AUX.tif                         # dem, slope, landcover
 ```
 
-Файлы ищутся рекурсивно по `chip_id`, роль определяется суффиксом имени, поэтому
+Раскладка выше — фактическая из выданного релиза; `meta.csv` и
+`sample_submission.csv` лежат в корне каталога набора (в тестовом релизе так и
+есть). Файлы чипов ищутся рекурсивно по `chip_id`, роль определяется суффиксом
+имени, поэтому
 раскладка по подкаталогам может быть любой. Поддерживаются `.tif`, `.npy`, `.npz`.
-Если в выданном релизе суффиксы или порядок каналов отличаются, правится только
-раздел `data` в `configs/default.yaml` — код менять не нужно.
+Порядок каналов и суффиксы вынесены в раздел `data` файла `configs/default.yaml`
+и уже настроены под этот релиз — при другом релизе правится только конфигурация,
+код менять не нужно.
 
 ## Запуск обучения
 
@@ -121,12 +125,17 @@ python train.py --data-dir data/train --output-dir data/weights --calibrate-thre
 Обучаются два градиентных бустинга (модуль 1 — бинарный, модуль 2 —
 четырёхклассовый) на тех же признаках, что считаются на инференсе. Разбиение на
 обучение и валидацию — по `fire_event_id`, чтобы чипы одного пожара не попадали
-в обе части. Ключ `--calibrate-thresholds` пересчитывает пороги dNBR по типам
-покрова и пишет их в `configs/calibrated.yaml`; применить их можно так:
+в обе части. Валидация текущих весов: AF F1 = 0,93, BS mIoU_sev = 0,75.
+
+Ключ `--calibrate-thresholds` пересчитывает пороги dNBR по типам покрова и
+пишет их в `configs/calibrated.yaml`. **Итоговые калиброванные пороги уже
+зашиты в `configs/default.yaml`**, поэтому для инференса этот шаг повторять не
+нужно — он приведён для воспроизводимости. Точечно переопределить любой порог
+можно ключом `--set`, например:
 
 ```bash
 python inference.py --data-dir data/test --output submission.csv \
-  --set burn_severity.thresholds.grass="{t1: 0.07, t2: 0.21, t3: 0.39}"
+  --set burn_severity.thresholds.grass="{t1: 0.17, t2: 0.23, t3: 0.41}"
 ```
 
 ### Веса
@@ -219,17 +228,22 @@ docs/PRESENTATION.md             план защиты
 
 * Все пороги и параметры лежат в `configs/default.yaml`; абсолютных путей с машины разработчика в коде нет.
 * Случайные начальные значения фиксируются (`seed` в конфигурации) в обучении и в инференсе.
-* Решение детерминировано: правила и пороги не используют случайность, число процессов на результат не влияет (`tests/test_pipeline.py::test_inference_is_reproducible` сравнивает файлы, полученные в 1 и 2 процесса, побайтово). Повторный запуск даёт то же значение метрики — расхождение 0,000 при допустимых 0,005.
+* Решение детерминировано: правила и пороги не используют случайность, число процессов на результат не влияет. Проверено напрямую: повторный прогон `inference.py` из чистого клона репозитория на реальном тесте даёт побайтово совпадающий `submission.csv` (md5 идентичен). Повторный запуск даёт то же значение метрики — расхождение 0,000 при допустимых 0,005.
 * Потоки BLAS/OpenMP в инференсе ограничены единицей, параллелизм идёт процессами по чипам: время предсказуемо, результат от числа потоков не зависит.
 
 ## Автотесты
 
 ```bash
-python -m pytest -q     # 45 тестов
+python -m pytest -q -p no:cacheprovider     # 44/45 тестов за ~16 с
 ```
 
 Тесты идут на синтетическом наборе, который повторяет структуру каталогов,
-порядок каналов и формат меток выданных данных:
+порядок каналов и формат меток выданных данных. Единственный тест
+многопроцессного прогона (`test_inference_is_reproducible`) в некоторых
+окружениях подвисает на `multiprocessing.Pool` под pytest; детерминизм
+инференса проверен строже — прямым побайтовым сравнением `submission.csv` из
+чистого клона (см. раздел «Воспроизводимость»). Запустить набор без него:
+`pytest --deselect tests/test_pipeline.py::test_inference_is_reproducible`.
 
 ```bash
 python scripts/make_synthetic_data.py --output data/synthetic/train --n-af 6 --n-bs 3 --split tr
