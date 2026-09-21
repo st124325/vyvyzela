@@ -206,7 +206,30 @@ tbody tr:hover { background: rgba(87,125,180,.10); }
   border-bottom: 1px solid var(--sep); padding-bottom: 4px;
 }
 
-canvas { display: block; width: 100%; height: 150px; background: var(--region); border: 1px solid var(--border); border-radius: var(--radius); }
+#soc-chart { display: block; width: 100%; height: 150px; background: var(--region); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* ── Gantt timeline ─────────────────────────────────────────── */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; font-size: 11.5px; color: var(--text-dim); }
+.lg { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block; border: 1px solid var(--border); }
+.sw-downlink { background: #4a7ad4; }
+.sw-relay { background: #5aab6a; }
+.sw-calibrate { background: #e0a44a; }
+.sw-idle { background: #3a3a3a; }
+.sw-contact { background: rgba(90,140,210,.22); }
+.sw-outage { background: #6a2f2f; }
+.sw-event { background: #d15b9a; }
+.sw-now { background: #e0e0e0; }
+.gantt-wrap { position: relative; }
+#gantt-canvas { display: block; width: 100%; background: var(--region); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.gantt-tooltip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: #0e0e0e; border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 5px 9px; font-family: var(--mono); font-size: 11px; color: var(--text);
+  white-space: nowrap; box-shadow: 0 3px 10px rgba(0,0,0,.5);
+}
+#sat-detail:not(:empty) { margin-top: 14px; }
+#sat-detail h3 { font-size: 12.5px; margin: 0 0 8px; color: var(--text-dim); border-bottom: 1px solid var(--sep); padding-bottom: 4px; }
 
 /* ── Status bar ─────────────────────────────────────────────── */
 .statusbar {

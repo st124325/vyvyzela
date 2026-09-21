@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from service import scenarios
 from service.diagnostics import diagnostics
+from service.schedule import schedule
 from service.store import Record, store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
@@ -192,6 +193,14 @@ def session_diagnostics(session_id: str) -> dict[str, Any]:
     """Aggregate loss analysis: blocked-command reasons and a breakdown of
     missed jobs into hard task limits vs planner-influenceable misses."""
     return diagnostics(store.get(session_id).session.env)
+
+
+@app.get('/api/sessions/{session_id}/schedule')
+def session_schedule(session_id: str) -> dict[str, Any]:
+    """Per-satellite executed schedule for the Gantt timeline, with contact
+    windows, outages and event markers — all from real state, no orbits."""
+    record = store.get(session_id)
+    return schedule(record.session.env, record.session.events)
 
 
 @app.get('/api/sessions/{session_id}/export')

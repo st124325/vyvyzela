@@ -4,6 +4,7 @@ const state = {
   session: null,
   compare: null,
   compareResult: null,
+  schedule: null, // last fetched Gantt schedule
   socHistory: {}, // sid -> [{step, pct}]
   log: [],        // accumulated executed rows, most recent last
 };
@@ -76,8 +77,12 @@ function switchTab(name) {
     t.classList.toggle('tab-active', t.dataset.tab === name));
   document.querySelectorAll('.tabpane').forEach(p =>
     p.classList.toggle('tabpane-active', p.dataset.pane === name));
-  // The SOC canvas sizes to its visible width, so redraw when it becomes visible.
+  // Canvases size to their visible width, so (re)draw when they become visible.
   if (name === 'monitor' && state.session) renderSocChart();
+  if (name === 'schedule' && state.session) {
+    el('sat-detail').innerHTML = '';
+    loadSchedule().catch(e => alert(e.message));
+  }
 }
 
 // ---------- advancing ----------
@@ -237,6 +242,164 @@ async function loadDiagnostics() {
     ${sampleTable(d.missed_had_opportunity)}`;
 }
 
+// ---------- Gantt timeline ----------
+
+const GANTT = { gutter: 66, header: 16, rowH: 13 };
+const ACTION = {
+  0: { color: null, label: 'простой' },
+  1: { color: '#4a7ad4', label: 'downlink' },
+  2: { color: '#5aab6a', label: 'relay' },
+  3: { color: '#e0a44a', label: 'калибровка' },
+};
+
+async function loadSchedule() {
+  state.schedule = await api(`/api/sessions/${state.session.id}/schedule`);
+  drawGantt();
+}
+
+function scheduleTabActive() {
+  const p = document.querySelector('.tabpane[data-pane="schedule"]');
+  return p && p.classList.contains('tabpane-active');
+}
+
+function drawGantt() {
+  const data = state.schedule;
+  if (!data) return;
+  const canvas = el('gantt-canvas');
+  const sats = data.satellites, n = data.total_steps, k = data.steps_executed;
+  const cssW = canvas.clientWidth || 900;
+  const cssH = GANTT.header + sats.length * GANTT.rowH;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.height = cssH + 'px';
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  const plotW = cssW - GANTT.gutter;
+  const xOf = (step) => GANTT.gutter + (step / n) * plotW;
+  const cellW = Math.max(1, plotW / n);
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textBaseline = 'middle';
+
+  // step axis ticks (every ~1/6 of the shift)
+  ctx.fillStyle = '#767676';
+  ctx.strokeStyle = '#2a2a2a';
+  const tickEvery = Math.max(1, Math.round(n / 12));
+  for (let s = 0; s <= n; s += tickEvery) {
+    const x = xOf(s);
+    ctx.fillText(String(s), x + 1, GANTT.header / 2);
+    ctx.beginPath(); ctx.moveTo(x, GANTT.header); ctx.lineTo(x, cssH); ctx.stroke();
+  }
+
+  sats.forEach((sat, i) => {
+    const y = GANTT.header + i * GANTT.rowH;
+    // row base (zebra)
+    ctx.fillStyle = i % 2 ? '#282828' : '#242424';
+    ctx.fillRect(GANTT.gutter, y, plotW, GANTT.rowH);
+    // contact windows (downlink OR relay available) — faint band
+    ctx.fillStyle = 'rgba(90,140,210,.20)';
+    for (let s = 0; s < n; s++) {
+      if (sat.downlink_available[s] || sat.relay_available[s]) ctx.fillRect(xOf(s), y, cellW + 0.5, GANTT.rowH);
+    }
+    // outages
+    ctx.fillStyle = 'rgba(150,60,60,.55)';
+    sat.outage.forEach(([a, b]) => ctx.fillRect(xOf(a), y, xOf(b) - xOf(a), GANTT.rowH));
+    // executed action cells
+    for (let s = 0; s < k; s++) {
+      const c = ACTION[sat.codes[s]].color;
+      if (!c) continue;
+      ctx.fillStyle = c;
+      ctx.fillRect(xOf(s), y + 1, cellW + 0.5, GANTT.rowH - 2);
+    }
+    // completion ticks
+    ctx.fillStyle = '#eafff0';
+    for (let s = 0; s < k; s++) {
+      if (sat.completed[s]) ctx.fillRect(xOf(s + 1) - 1.5, y + 1, 1.5, GANTT.rowH - 2);
+    }
+    // label
+    ctx.fillStyle = '#c8c8c8';
+    ctx.fillText(sat.id, 4, y + GANTT.rowH / 2);
+  });
+
+  // event markers
+  data.events.forEach(ev => {
+    const x = xOf(ev.at_step);
+    ctx.strokeStyle = '#d15b9a'; ctx.setLineDash([3, 2]);
+    ctx.beginPath(); ctx.moveTo(x, GANTT.header); ctx.lineTo(x, cssH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#d15b9a'; ctx.fillRect(x - 2, 0, 4, GANTT.header - 2);
+  });
+
+  // current-step line
+  const xk = xOf(k);
+  ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(xk, 0); ctx.lineTo(xk, cssH); ctx.stroke();
+}
+
+function ganttHit(e) {
+  const data = state.schedule;
+  const canvas = el('gantt-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const plotW = canvas.clientWidth - GANTT.gutter;
+  if (x < GANTT.gutter || y < GANTT.header) return null;
+  const step = Math.floor((x - GANTT.gutter) / plotW * data.total_steps);
+  const idx = Math.floor((y - GANTT.header) / GANTT.rowH);
+  if (idx < 0 || idx >= data.satellites.length || step < 0 || step >= data.total_steps) return null;
+  return { sat: data.satellites[idx], step };
+}
+
+function onGanttHover(e) {
+  const tip = el('gantt-tooltip');
+  const hit = ganttHit(e);
+  if (!hit) { tip.classList.add('hidden'); return; }
+  const { sat, step } = hit;
+  let what;
+  if (step >= state.schedule.steps_executed) what = 'ещё не рассчитано';
+  else {
+    what = ACTION[sat.codes[step]].label;
+    if (sat.jobs[step]) what += ` · ${sat.jobs[step]}`;
+    if (sat.completed[step]) what += ' · завершено ✓';
+  }
+  const contact = (sat.downlink_available[step] || sat.relay_available[step]) ? ' · есть связь' : '';
+  tip.textContent = `${sat.id} · шаг ${step} · ${what}${contact}`;
+  tip.classList.remove('hidden');
+  const wrap = el('gantt-canvas').parentElement.getBoundingClientRect();
+  tip.style.left = (e.clientX - wrap.left + 12) + 'px';
+  tip.style.top = (e.clientY - wrap.top + 12) + 'px';
+}
+
+function onGanttClick(e) {
+  const hit = ganttHit(e);
+  if (!hit) return;
+  const sat = hit.sat;
+  const st = state.session.observation.state[sat.id];
+  const cap = state.session.capacities_wh[sat.id];
+  const jobs = Object.values(state.session.observation.jobs)
+    .filter(j => j.eligible_satellites.includes(sat.id));
+  const jobStatusOf = (j) => j.completed_step !== null ? 'done'
+    : (j.deadline_step <= state.session.observation.step ? 'missed' : 'active');
+  el('sat-detail').innerHTML = `
+    <h3>Аппарат ${sat.id}</h3>
+    <div class="cards">
+      <div class="card"><div class="value">${st ? (100 * st.energy_wh / cap).toFixed(1) : '—'}%</div><div class="label">заряд</div></div>
+      <div class="card"><div class="value">${st ? st.temp_c.toFixed(1) : '—'}°</div><div class="label">температура</div></div>
+      <div class="card"><div class="value">${st ? st.calibration_age_steps : '—'}</div><div class="label">возраст калибровки</div></div>
+      <div class="card"><div class="value">${sat.counts.downlink}</div><div class="label">шагов downlink</div></div>
+      <div class="card"><div class="value">${sat.counts.relay}</div><div class="label">шагов relay</div></div>
+      <div class="card"><div class="value">${sat.counts.calibrate}</div><div class="label">калибровок</div></div>
+      <div class="card"><div class="value">${sat.counts.idle}</div><div class="label">простой</div></div>
+    </div>
+    <h3>Задания с этим аппаратом (${jobs.length})</h3>
+    <div class="scroll scroll-sm"><table><thead><tr><th>ID</th><th>Вид</th><th>Приоритет</th><th>$</th><th>Окно</th><th>Осталось</th><th>Статус</th></tr></thead>
+    <tbody>${jobs.slice(0, 200).map(j => { const s = jobStatusOf(j); return `<tr>
+      <td>${j.id}</td><td>${j.kind}</td><td>${j.priority}</td><td>${j.value_usd}</td>
+      <td>${j.release_step}–${j.deadline_step}</td><td>${j.remaining_steps}</td>
+      <td class="status-${s}">${s}</td></tr>`; }).join('') || '<tr><td colspan="7">нет</td></tr>'}</tbody></table></div>`;
+}
+
 // ---------- rendering ----------
 
 function renderAll() {
@@ -263,6 +426,7 @@ function renderAll() {
   renderJobs(s.observation.jobs, s.observation.step);
   renderLog();
   renderCompare();
+  if (scheduleTabActive()) loadSchedule().catch(() => {});
 }
 
 function renderSummary(summary) {
@@ -458,6 +622,10 @@ el('log-filter').addEventListener('input', renderLog);
 
 document.querySelectorAll('.tab').forEach(tab =>
   tab.addEventListener('click', () => { if (!tab.disabled) switchTab(tab.dataset.tab); }));
+
+el('gantt-canvas').addEventListener('mousemove', onGanttHover);
+el('gantt-canvas').addEventListener('mouseleave', () => el('gantt-tooltip').classList.add('hidden'));
+el('gantt-canvas').addEventListener('click', onGanttClick);
 
 // Click the timeline scrubber to run the shift up to that step.
 el('scrubber').addEventListener('click', (e) => {

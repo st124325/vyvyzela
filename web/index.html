@@ -55,6 +55,7 @@
 <nav class="tabs" id="tabs">
   <button class="tab tab-active" data-tab="setup">Настройка</button>
   <button class="tab" data-tab="monitor" disabled>Мониторинг</button>
+  <button class="tab" data-tab="schedule" disabled>Расписание</button>
   <button class="tab" data-tab="events" disabled>События</button>
   <button class="tab" data-tab="analysis" disabled>Анализ</button>
   <button class="tab" data-tab="compare" disabled>Сравнение</button>
@@ -132,6 +133,33 @@
         <input id="job-filter" class="filter" placeholder="Фильтр: id или статус (done / missed / active)">
         <div class="scroll"><table id="jobs-table"><thead></thead><tbody></tbody></table></div>
         <div id="job-explain"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Tab: Schedule (Gantt) ─────────────────────────────── -->
+  <section class="tabpane" data-pane="schedule">
+    <div class="panel">
+      <div class="panel-head">
+        Расписание группировки
+        <span class="panel-sub">клик по строке аппарата — подробности; наведение — действие на шаге</span>
+      </div>
+      <div class="panel-body">
+        <div class="legend">
+          <span class="lg"><i class="sw sw-downlink"></i>downlink</span>
+          <span class="lg"><i class="sw sw-relay"></i>relay</span>
+          <span class="lg"><i class="sw sw-calibrate"></i>калибровка</span>
+          <span class="lg"><i class="sw sw-idle"></i>простой</span>
+          <span class="lg"><i class="sw sw-contact"></i>окно связи</span>
+          <span class="lg"><i class="sw sw-outage"></i>недоступность</span>
+          <span class="lg"><i class="sw sw-event"></i>событие</span>
+          <span class="lg"><i class="sw sw-now"></i>текущий шаг</span>
+        </div>
+        <div class="gantt-wrap">
+          <canvas id="gantt-canvas"></canvas>
+          <div id="gantt-tooltip" class="gantt-tooltip hidden"></div>
+        </div>
+        <div id="sat-detail"></div>
       </div>
     </div>
   </section>

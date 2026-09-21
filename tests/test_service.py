@@ -156,6 +156,26 @@ def test_diagnostics_flags_unwinnable_job_as_hard_limit():
     assert body['missed_no_contact_window'][0]['work_done'] == 0
 
 
+def test_schedule_returns_per_satellite_timeline():
+    created = client.post('/api/sessions', json={
+        'scenario': 'P01_intro', 'goal': 'priority', 'algorithm': 'scoring'})
+    sid = created.json()['id']
+    client.post(f'/api/sessions/{sid}/advance', json={'until_step': 20})
+    sch = client.get(f'/api/sessions/{sid}/schedule')
+    assert sch.status_code == 200, sch.text
+    body = sch.json()
+    assert body['steps_executed'] == 20
+    assert body['total_steps'] == 48
+    assert len(body['satellites']) == 16
+    sat = body['satellites'][0]
+    # executed-action arrays cover the executed steps; availability spans the shift
+    assert len(sat['codes']) == 20
+    assert len(sat['downlink_available']) == 48
+    assert set(sat['codes']) <= {0, 1, 2, 3}
+    assert sat['counts']['downlink'] + sat['counts']['relay'] + \
+           sat['counts']['calibrate'] + sat['counts']['idle'] == 20
+
+
 def test_invalid_event_returns_400_and_preserves_state():
     created = client.post('/api/sessions', json={'scenario': 'P01_intro'})
     sid = created.json()['id']
