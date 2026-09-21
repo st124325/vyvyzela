@@ -2,152 +2,221 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Автономное управление спутниковой группировкой</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Управление спутниковой группировкой</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Планирование спутниковой группировки</h1>
-  <div id="session-badge" class="badge hidden"></div>
+
+<!-- ── Header (Blender top bar) ─────────────────────────────── -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">◈</span>
+    <span class="brand-name">Орбита·Планировщик</span>
+  </div>
+  <div class="topbar-info" id="session-badge">смена не загружена</div>
+  <div class="topbar-actions">
+    <button id="btn-export" class="btn btn-ghost" disabled>⬇ Выгрузить</button>
+  </div>
 </header>
 
-<section id="setup" class="panel">
-  <h2>1. Сценарий смены</h2>
-  <div class="row">
-    <label>Сценарий
-      <select id="scenario-select"></select>
-    </label>
-    <label>Цель управления
-      <select id="goal-select">
-        <option value="priority">Приоритетное обслуживание</option>
-        <option value="revenue">Коммерческая отдача</option>
-      </select>
-    </label>
-    <label>Алгоритм
-      <select id="algorithm-select">
-        <option value="scoring">Наш планировщик (scoring-greedy)</option>
-        <option value="baseline">Baseline (earliest deadline)</option>
-      </select>
-    </label>
+<!-- ── Playback / timeline bar (persistent, Blender timeline) ── -->
+<div class="playbar hidden" id="playbar">
+  <div class="playbar-controls">
+    <button id="btn-step" class="btn btn-icon" title="Один шаг вперёд">▶|</button>
+    <div class="field-inline">
+      <input id="advance-n" type="number" value="10" min="1">
+      <button id="btn-advance-n" class="btn">Вперёд</button>
+    </div>
+    <div class="field-inline">
+      <span class="field-label">до</span>
+      <input id="advance-until" type="number" min="0">
+      <button id="btn-advance-until" class="btn">Стоп на</button>
+    </div>
+    <button id="btn-advance-all" class="btn btn-accent" title="Досчитать смену до конца">▶▶ До конца</button>
   </div>
-
-  <details>
-    <summary>Изменить условия эксперимента (необязательно)</summary>
-    <div class="row">
-      <label>Заряд аппарата <input id="ov-soc-sat" placeholder="S01" size="6"></label>
-      <label>% <input id="ov-soc-val" type="number" min="0" max="100" size="4"></label>
-      <label>Коэфф. солнечной мощности <input id="ov-solar" type="number" step="0.05" size="5"></label>
+  <div class="playbar-timeline">
+    <div class="scrubber" id="scrubber" title="Прогресс смены">
+      <div class="scrubber-fill" id="scrubber-fill"></div>
+      <div class="scrubber-label" id="step-indicator">шаг 0</div>
     </div>
-    <div class="row">
-      <label>Приоритет задания <input id="ov-prio-job" placeholder="JOB-0001" size="10"></label>
-      <label>Новый приоритет <input id="ov-prio-val" type="number" min="1" max="3" size="3"></label>
+  </div>
+  <div class="playbar-goal">
+    <span class="field-label">цель</span>
+    <select id="goal-switch-select">
+      <option value="priority">Приоритет</option>
+      <option value="revenue">Выручка</option>
+    </select>
+    <button id="btn-switch-goal" class="btn">Сменить</button>
+  </div>
+</div>
+
+<!-- ── Workspace tabs (Blender workspace strip) ─────────────── -->
+<nav class="tabs" id="tabs">
+  <button class="tab tab-active" data-tab="setup">Настройка</button>
+  <button class="tab" data-tab="monitor" disabled>Мониторинг</button>
+  <button class="tab" data-tab="events" disabled>События</button>
+  <button class="tab" data-tab="analysis" disabled>Анализ</button>
+  <button class="tab" data-tab="compare" disabled>Сравнение</button>
+</nav>
+
+<main class="workspace">
+
+  <!-- ── Tab: Setup ────────────────────────────────────────── -->
+  <section class="tabpane tabpane-active" data-pane="setup">
+    <div class="panel panel-narrow">
+      <div class="panel-head">Параметры смены</div>
+      <div class="panel-body">
+        <div class="prop"><label>Сценарий</label><select id="scenario-select"></select></div>
+        <div class="prop"><label>Цель управления</label>
+          <select id="goal-select">
+            <option value="priority">Приоритетное обслуживание</option>
+            <option value="revenue">Коммерческая отдача</option>
+          </select></div>
+        <div class="prop"><label>Алгоритм</label>
+          <select id="algorithm-select">
+            <option value="scoring">scoring-greedy (наш)</option>
+            <option value="baseline">baseline (earliest deadline)</option>
+          </select></div>
+
+        <details class="subsection">
+          <summary>Изменить условия эксперимента</summary>
+          <div class="subsection-body">
+            <div class="prop"><label>Заряд аппарата</label>
+              <div class="pair"><input id="ov-soc-sat" placeholder="S01"><input id="ov-soc-val" type="number" min="0" max="100" placeholder="%"></div></div>
+            <div class="prop"><label>Коэфф. солнечной мощности</label>
+              <input id="ov-solar" type="number" step="0.05" placeholder="1.0"></div>
+            <div class="prop"><label>Приоритет задания</label>
+              <div class="pair"><input id="ov-prio-job" placeholder="JOB-0001"><input id="ov-prio-val" type="number" min="1" max="3" placeholder="1-3"></div></div>
+          </div>
+        </details>
+
+        <button id="btn-create" class="btn btn-accent btn-block">Загрузить и запустить смену</button>
+      </div>
     </div>
-  </details>
-
-  <button id="btn-create">Загрузить сценарий и запустить смену</button>
-</section>
-
-<section id="workspace" class="hidden">
-
-  <section class="panel">
-    <h2>2. Ход расчёта</h2>
-    <div class="row">
-      <button id="btn-step">Шаг (+1)</button>
-      <label>Шагов вперёд <input id="advance-n" type="number" value="10" min="1" size="4"></label>
-      <button id="btn-advance-n">Выполнить</button>
-      <label>До шага <input id="advance-until" type="number" size="5"></label>
-      <button id="btn-advance-until">Остановиться перед</button>
-      <button id="btn-advance-all">Выполнить всё до конца</button>
-      <span id="step-indicator"></span>
-    </div>
-    <div class="row">
-      <label>Сменить цель на этом шаге
-        <select id="goal-switch-select">
-          <option value="priority">Приоритетное обслуживание</option>
-          <option value="revenue">Коммерческая отдача</option>
-        </select>
-      </label>
-      <button id="btn-switch-goal">Применить</button>
-      <button id="btn-export">Выгрузить результат (JSON)</button>
+    <div class="panel panel-hint">
+      <div class="panel-head">Как работать</div>
+      <div class="panel-body hint">
+        Выберите сценарий, цель и алгоритм → запустите смену. Затем на панели
+        воспроизведения вверху считайте по шагам или до конца, во вкладке
+        «События» вводите новые сообщения, во вкладке «Анализ» разбирайте
+        потери, во вкладке «Сравнение» ставьте две стратегии рядом.
+      </div>
     </div>
   </section>
 
-  <section class="panel">
-    <h2>3. Новое сообщение (событие)</h2>
-    <div class="row">
-      <label>Тип
-        <select id="event-type">
-          <option value="add_jobs">Поступление заданий</option>
-          <option value="satellite_outage">Недоступность аппаратов</option>
-          <option value="close_downlink">Отмена сеансов передачи</option>
-        </select>
-      </label>
-      <label>Аппараты (через запятую) <input id="event-sats" placeholder="S01,S02" size="14"></label>
-      <label>До шага <input id="event-end" type="number" size="5"></label>
+  <!-- ── Tab: Monitor ──────────────────────────────────────── -->
+  <section class="tabpane" data-pane="monitor">
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-head">Показатели смены</div>
+        <div class="panel-body"><div id="summary-cards" class="cards"></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">Заряд аппаратов по шагам</div>
+        <div class="panel-body">
+          <canvas id="soc-chart" width="900" height="150"></canvas>
+          <div class="hint">Каждая линия — один аппарат. Пунктир — резерв 30%.</div>
+        </div>
+      </div>
     </div>
-    <div class="row" id="event-job-row">
-      <label>ID задания <input id="ej-id" placeholder="NEW-01" size="10"></label>
-      <label>Тип <select id="ej-kind"><option value="relay">relay</option><option value="downlink">downlink</option></select></label>
-      <label>work_steps <input id="ej-work" type="number" value="1" size="3"></label>
-      <label>deadline_step <input id="ej-deadline" type="number" size="5"></label>
-      <label>priority <input id="ej-priority" type="number" min="1" max="3" value="2" size="2"></label>
-      <label>value_usd <input id="ej-value" type="number" value="10" size="5"></label>
+
+    <div class="panel">
+      <div class="panel-head">Состояние аппаратов</div>
+      <div class="panel-body"><div class="scroll scroll-sm"><table id="sat-table"><thead></thead><tbody></tbody></table></div></div>
     </div>
-    <button id="btn-send-event">Отправить сообщение</button>
-    <div id="event-error" class="error"></div>
-  </section>
 
-  <section class="panel">
-    <h2>4. Показатели смены</h2>
-    <div id="summary-cards" class="cards"></div>
-  </section>
-
-  <section class="panel">
-    <h2>5. Состояние аппаратов</h2>
-    <div class="scroll"><table id="sat-table"><thead></thead><tbody></tbody></table></div>
-    <canvas id="soc-chart" width="900" height="160"></canvas>
-    <div class="hint">Заряд аппаратов по шагам (каждая линия — один аппарат)</div>
-  </section>
-
-  <section class="panel">
-    <h2>6. Задания</h2>
-    <div class="row">
-      <input id="job-filter" placeholder="Фильтр по id / статусу (done, missed, active)">
+    <div class="panel">
+      <div class="panel-head">Задания <span class="panel-sub" id="jobs-hint">кликните строку для разбора</span></div>
+      <div class="panel-body">
+        <input id="job-filter" class="filter" placeholder="Фильтр: id или статус (done / missed / active)">
+        <div class="scroll"><table id="jobs-table"><thead></thead><tbody></tbody></table></div>
+        <div id="job-explain"></div>
+      </div>
     </div>
-    <div class="scroll"><table id="jobs-table"><thead></thead><tbody></tbody></table></div>
-    <div id="jobs-hint" class="hint">Кликните по строке задания, чтобы разобрать его историю по шагам.</div>
-    <div id="job-explain"></div>
   </section>
 
-  <section class="panel">
-    <h2>7. Журнал решений</h2>
-    <div class="row">
-      <input id="log-filter" placeholder="Фильтр по причине (accepted, energy_reserve, thermal_limit, ...)">
+  <!-- ── Tab: Events ───────────────────────────────────────── -->
+  <section class="tabpane" data-pane="events">
+    <div class="panel panel-narrow">
+      <div class="panel-head">Новое сообщение</div>
+      <div class="panel-body">
+        <div class="prop"><label>Тип</label>
+          <select id="event-type">
+            <option value="add_jobs">Поступление заданий</option>
+            <option value="satellite_outage">Недоступность аппаратов</option>
+            <option value="close_downlink">Отмена сеансов передачи</option>
+          </select></div>
+        <div class="prop"><label>Аппараты (через запятую)</label><input id="event-sats" placeholder="S01,S02"></div>
+        <div class="prop"><label>До шага</label><input id="event-end" type="number"></div>
+        <div id="event-job-row" class="event-job">
+          <div class="prop"><label>ID задания</label><input id="ej-id" placeholder="NEW-01"></div>
+          <div class="prop"><label>Вид</label><select id="ej-kind"><option value="relay">relay</option><option value="downlink">downlink</option></select></div>
+          <div class="pair-3">
+            <div class="prop"><label>work_steps</label><input id="ej-work" type="number" value="1"></div>
+            <div class="prop"><label>deadline_step</label><input id="ej-deadline" type="number"></div>
+            <div class="prop"><label>priority</label><input id="ej-priority" type="number" min="1" max="3" value="2"></div>
+          </div>
+          <div class="prop"><label>value_usd</label><input id="ej-value" type="number" value="10"></div>
+        </div>
+        <button id="btn-send-event" class="btn btn-accent btn-block">Отправить сообщение</button>
+        <div id="event-error" class="error"></div>
+      </div>
     </div>
-    <div class="scroll"><table id="log-table"><thead></thead><tbody></tbody></table></div>
-  </section>
 
-  <section class="panel">
-    <h2>8. Сравнение вариантов</h2>
-    <div class="row">
-      <label>Цель второй ветви
-        <select id="fork-goal">
-          <option value="priority">Приоритетное обслуживание</option>
-          <option value="revenue">Коммерческая отдача</option>
-        </select>
-      </label>
-      <label>Алгоритм второй ветви
-        <select id="fork-algorithm">
-          <option value="scoring">scoring-greedy</option>
-          <option value="baseline">baseline</option>
-        </select>
-      </label>
-      <button id="btn-fork">Создать ветвь сравнения из текущего состояния</button>
+    <div class="panel">
+      <div class="panel-head">Журнал решений</div>
+      <div class="panel-body">
+        <input id="log-filter" class="filter" placeholder="Фильтр по причине: accepted, energy_reserve, thermal_limit, no_contact …">
+        <div class="scroll"><table id="log-table"><thead></thead><tbody></tbody></table></div>
+      </div>
     </div>
-    <div id="compare-panel"></div>
   </section>
 
-</section>
+  <!-- ── Tab: Analysis ─────────────────────────────────────── -->
+  <section class="tabpane" data-pane="analysis">
+    <div class="panel">
+      <div class="panel-head">Потери и узкие места</div>
+      <div class="panel-body">
+        <button id="btn-diagnostics" class="btn btn-accent">Проанализировать потери</button>
+        <div id="diagnostics-panel">
+          <div class="hint">Раскладывает невыполненные задания на жёсткие ограничения задачи
+          (не было сеанса связи — планировщик не мог помочь) и потери, на которые
+          планировщик влияет (конкуренция за ресурс, энергия, приоритет).</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Tab: Compare ──────────────────────────────────────── -->
+  <section class="tabpane" data-pane="compare">
+    <div class="panel">
+      <div class="panel-head">Сравнение вариантов</div>
+      <div class="panel-body">
+        <div class="row">
+          <div class="prop"><label>Цель второй ветви</label>
+            <select id="fork-goal"><option value="priority">Приоритет</option><option value="revenue">Выручка</option></select></div>
+          <div class="prop"><label>Алгоритм второй ветви</label>
+            <select id="fork-algorithm"><option value="scoring">scoring-greedy</option><option value="baseline">baseline</option></select></div>
+          <button id="btn-fork" class="btn btn-accent">Создать ветвь из текущего состояния</button>
+        </div>
+        <div id="compare-panel"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Status bar (Blender bottom bar) ──────────────────────── -->
+<footer class="statusbar hidden" id="statusbar">
+  <span class="status-item" id="st-state">—</span>
+  <span class="status-sep"></span>
+  <span class="status-item">выполнено <b id="st-done">0</b></span>
+  <span class="status-item">просрочено <b id="st-missed">0</b></span>
+  <span class="status-item">приоритет-3 <b id="st-crit">0/0</b></span>
+  <span class="status-item">выручка <b id="st-rev">$0</b></span>
+  <span class="status-item">мин. заряд <b id="st-soc">—</b></span>
+</footer>
 
 <script src="app.js"></script>
 </body>

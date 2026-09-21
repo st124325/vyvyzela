@@ -59,8 +59,25 @@ async function createSession() {
   state.compareResult = null;
   state.socHistory = {};
   state.log = [];
-  el('workspace').classList.remove('hidden');
+  // Reveal the operator console and enable navigation now a shift exists.
+  el('playbar').classList.remove('hidden');
+  el('statusbar').classList.remove('hidden');
+  el('btn-export').disabled = false;
+  document.querySelectorAll('.tab[disabled]').forEach(t => (t.disabled = false));
+  el('goal-switch-select').value = session.goal;
+  switchTab('monitor');
   renderAll();
+}
+
+// ---------- tabs ----------
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('tab-active', t.dataset.tab === name));
+  document.querySelectorAll('.tabpane').forEach(p =>
+    p.classList.toggle('tabpane-active', p.dataset.pane === name));
+  // The SOC canvas sizes to its visible width, so redraw when it becomes visible.
+  if (name === 'monitor' && state.session) renderSocChart();
 }
 
 // ---------- advancing ----------
@@ -174,16 +191,73 @@ async function runCompareToEnd() {
   renderAll();
 }
 
+// ---------- diagnostics ----------
+
+const REASON_RU = {
+  no_contact: 'нет сеанса связи',
+  energy_reserve: 'резерв энергии',
+  thermal_limit: 'тепловой предел',
+  calibration_required: 'нужна калибровка',
+  ground_capacity: 'лимит downlink (2)',
+  satellite_unavailable: 'аппарат недоступен',
+  outside_job_window: 'вне окна',
+  ineligible_satellite: 'не допустимый исполнитель',
+  duplicate_job_in_step: 'занято другим аппаратом',
+};
+
+async function loadDiagnostics() {
+  const d = await api(`/api/sessions/${state.session.id}/diagnostics`);
+  const blocked = Object.entries(d.blocked_reasons);
+  const blockedHtml = blocked.length
+    ? `<div class="scroll"><table><thead><tr><th>Причина отклонения</th><th>Раз</th></tr></thead>
+       <tbody>${blocked.map(([r, n]) => `<tr><td>${REASON_RU[r] || r}</td><td>${n}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="hint">Планировщик не запрашивал заведомо невыполнимых действий (отклонённых команд нет).</div>';
+
+  const sampleTable = (rows) => rows.length
+    ? `<div class="scroll"><table><thead><tr><th>Задание</th><th>Приоритет</th><th>$</th><th>Сделано</th><th>Ограничения (из журнала)</th></tr></thead>
+       <tbody>${rows.map(j => `<tr>
+         <td>${j.id}</td><td>${j.priority}</td><td>${j.value_usd}</td>
+         <td>${j.work_done}/${j.work_steps}</td>
+         <td>${Object.keys(j.attempt_rejections).map(r => REASON_RU[r] || r).join(', ') || '—'}</td>
+       </tr>`).join('')}</tbody></table></div>`
+    : '<div class="hint">Нет.</div>';
+
+  el('diagnostics-panel').innerHTML = `
+    <div class="cards">
+      <div class="card"><div class="value">${d.missed_total}</div><div class="label">Просрочено всего</div></div>
+      <div class="card"><div class="value">${d.missed_no_contact_window_total}</div><div class="label">Ограничение задачи (не было сеанса)</div></div>
+      <div class="card"><div class="value">${d.missed_had_opportunity_total}</div><div class="label">Была возможность (конкуренция/энергия/приоритет)</div></div>
+      <div class="card"><div class="value">${d.idle_satellite_steps}</div><div class="label">Простой (апп×шаг)</div></div>
+    </div>
+    <h3>Отклонённые команды</h3>${blockedHtml}
+    <h3>Ограничение задачи: не было сеанса связи (планировщик не мог помочь) — топ ${Math.min(d.missed_no_contact_window.length, 100)}</h3>
+    ${sampleTable(d.missed_no_contact_window)}
+    <h3>Была возможность — потеряно из-за конкуренции/энергии/приоритета — топ ${Math.min(d.missed_had_opportunity.length, 100)}</h3>
+    <div class="hint">Пустое поле ограничений означает, что планировщик не запрашивал задание (выбрал другую работу по приоритету/ценности). «Сделано» больше нуля — задание было начато, но не завершено в срок; такой частичный прогресс выручки не приносит.</div>
+    ${sampleTable(d.missed_had_opportunity)}`;
+}
+
 // ---------- rendering ----------
 
 function renderAll() {
   const s = state.session;
-  el('session-badge').classList.remove('hidden');
-  el('session-badge').textContent =
-    `${s.scenario_name} · ${s.algorithm} · ${s.goal} · шаг ${s.observation.step}/${s.total_steps}`;
-  el('step-indicator').textContent = `шаг ${s.observation.step} из ${s.total_steps}`;
+  const step = s.observation.step, total = s.total_steps;
+  el('session-badge').textContent = `${s.scenario_name} · ${s.algorithm} · ${s.goal}`;
 
-  renderSummary(s.summary);
+  // playback scrubber
+  el('scrubber-fill').style.width = `${(step / total) * 100}%`;
+  el('step-indicator').textContent = `шаг ${step} / ${total}`;
+
+  // status bar
+  const sm = s.summary;
+  el('st-state').textContent = step >= total ? 'смена завершена' : 'смена идёт';
+  el('st-done').textContent = sm.jobs_completed;
+  el('st-missed').textContent = sm.jobs_due_missed;
+  el('st-crit').textContent = `${sm.critical_jobs_completed_on_time}/${sm.critical_jobs_due}`;
+  el('st-rev').textContent = `$${sm.revenue_usd.toFixed(2)}`;
+  el('st-soc').textContent = `${sm.minimum_soc_pct.toFixed(1)}%`;
+
+  renderSummary(sm);
   renderSatellites(s.observation.state, s.observation.available, s.capacities_wh);
   renderSocChart();
   renderJobs(s.observation.jobs, s.observation.step);
@@ -226,8 +300,18 @@ function renderSatellites(stateBySat, available, capacities) {
 
 function renderSocChart() {
   const canvas = el('soc-chart');
+  // Match the drawing buffer to the rendered width (device-pixel-aware) so
+  // the plot fills the panel and stays crisp instead of scaling a 900px bitmap.
+  const cssWidth = canvas.clientWidth || 900;
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(cssWidth * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(150 * dpr);
+  }
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = cssWidth, H = 150;
+  ctx.clearRect(0, 0, W, H);
   const sats = Object.keys(state.socHistory);
   if (!sats.length) return;
   const total = state.session.total_steps;
@@ -238,8 +322,8 @@ function renderSocChart() {
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     points.forEach((p, idx) => {
-      const x = (p.step / total) * canvas.width;
-      const y = canvas.height - (p.pct / 100) * canvas.height;
+      const x = (p.step / total) * W;
+      const y = H - (p.pct / 100) * H;
       idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
@@ -247,8 +331,8 @@ function renderSocChart() {
   // reserve line at 30%
   ctx.strokeStyle = '#6d7aa0';
   ctx.setLineDash([4, 4]);
-  const y30 = canvas.height - 0.30 * canvas.height;
-  ctx.beginPath(); ctx.moveTo(0, y30); ctx.lineTo(canvas.width, y30); ctx.stroke();
+  const y30 = H - 0.30 * H;
+  ctx.beginPath(); ctx.moveTo(0, y30); ctx.lineTo(W, y30); ctx.stroke();
   ctx.setLineDash([]);
 }
 
@@ -368,7 +452,20 @@ el('btn-switch-goal').addEventListener('click', () => switchGoal().catch(e => al
 el('btn-export').addEventListener('click', () => exportSession().catch(e => alert(e.message)));
 el('btn-send-event').addEventListener('click', () => sendEvent());
 el('btn-fork').addEventListener('click', () => forkSession().catch(e => alert(e.message)));
+el('btn-diagnostics').addEventListener('click', () => loadDiagnostics().catch(e => alert(e.message)));
 el('job-filter').addEventListener('input', () => renderJobs(state.session.observation.jobs, state.session.observation.step));
 el('log-filter').addEventListener('input', renderLog);
+
+document.querySelectorAll('.tab').forEach(tab =>
+  tab.addEventListener('click', () => { if (!tab.disabled) switchTab(tab.dataset.tab); }));
+
+// Click the timeline scrubber to run the shift up to that step.
+el('scrubber').addEventListener('click', (e) => {
+  if (!state.session) return;
+  const rect = el('scrubber').getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const target = Math.round(frac * state.session.total_steps);
+  if (target > state.session.observation.step) advance({ until_step: target }).catch(err => alert(err.message));
+});
 
 loadScenarios().catch(e => alert('Не удалось загрузить список сценариев: ' + e.message));

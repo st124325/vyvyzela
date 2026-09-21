@@ -100,6 +100,62 @@ def test_explain_unknown_job_returns_404():
     assert resp.status_code == 404
 
 
+def test_diagnostics_breaks_down_misses():
+    created = client.post('/api/sessions', json={
+        'scenario': 'P02_shift', 'goal': 'priority', 'algorithm': 'scoring'})
+    sid = created.json()['id']
+    client.post(f'/api/sessions/{sid}/advance', json={'until_step': 288})
+    diag = client.get(f'/api/sessions/{sid}/diagnostics')
+    assert diag.status_code == 200, diag.text
+    body = diag.json()
+    # the two categories must sum to the total missed count
+    assert (body['missed_no_contact_window_total'] + body['missed_had_opportunity_total']
+            == body['missed_total'])
+    assert isinstance(body['blocked_reasons'], dict)
+    # sample lists are capped
+    assert len(body['missed_had_opportunity']) <= 100
+
+
+def test_diagnostics_flags_unwinnable_job_as_hard_limit():
+    """A downlink job whose only satellite never has a contact window during
+    its span must be classified as a task limit (no_contact_window), not as a
+    planner miss."""
+    from model.resource_env import Environment
+    from service.diagnostics import diagnostics
+
+    scenario = {
+        'schema_version': 'cosmo-B-ops-1.0',
+        'meta': {'id': 'unit', 'title': 'unit'},
+        'time': {'step_s': 300, 'steps': 4},
+        'model': {'reserve_soc_pct': 30.0, 'critical_soc_pct': 20.0,
+                  'charge_efficiency': 0.92, 'discharge_efficiency': 0.95,
+                  'thermal_tau_s': 1800.0, 'thermal_gain_c_per_w': 0.2,
+                  'heater_below_c': 5.0, 'payload_min_c': -5.0, 'payload_max_c': 45.0,
+                  'charge_min_c': 0.0, 'charge_max_c': 45.0,
+                  'calibration_valid_steps': 48, 'downlink_parallel_limit': 2},
+        'satellites': [{'id': 'S01', 'capacity_wh': 100.0, 'initial_soc_pct': 90.0,
+                        'initial_temp_c': 18.0, 'base_w': 18.0, 'heater_w': 30.0,
+                        'calibration_w': 20.0, 'downlink_w': 90.0, 'relay_w': 65.0,
+                        'initial_calibration_age_steps': 0}],
+        'environment': {'S01': {'solar_w': [200.0] * 4, 'thermal_target_c': [18.0] * 4,
+                                'downlink_available': [False] * 4,  # never any contact
+                                'relay_available': [True] * 4}},
+        'jobs': [{'id': 'NOCONTACT', 'kind': 'downlink', 'release_step': 0,
+                  'deadline_step': 3, 'work_steps': 1, 'eligible_satellites': ['S01'],
+                  'priority': 3, 'value_usd': 50.0}],
+        'failures': [],
+    }
+    env = Environment(scenario)
+    for _ in range(3):
+        env.step({})  # let the job's window elapse; it can never be worked
+    body = diagnostics(env)
+    assert body['missed_total'] == 1
+    assert body['missed_no_contact_window_total'] == 1
+    assert body['missed_had_opportunity_total'] == 0
+    assert body['missed_no_contact_window'][0]['id'] == 'NOCONTACT'
+    assert body['missed_no_contact_window'][0]['work_done'] == 0
+
+
 def test_invalid_event_returns_400_and_preserves_state():
     created = client.post('/api/sessions', json={'scenario': 'P01_intro'})
     sid = created.json()['id']

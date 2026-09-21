@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from service import scenarios
+from service.diagnostics import diagnostics
 from service.store import Record, store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
@@ -184,6 +185,13 @@ def explain_job(session_id: str, job_id: str) -> dict[str, Any]:
 def delete_session(session_id: str) -> dict[str, str]:
     store.delete(session_id)
     return {'status': 'deleted'}
+
+
+@app.get('/api/sessions/{session_id}/diagnostics')
+def session_diagnostics(session_id: str) -> dict[str, Any]:
+    """Aggregate loss analysis: blocked-command reasons and a breakdown of
+    missed jobs into hard task limits vs planner-influenceable misses."""
+    return diagnostics(store.get(session_id).session.env)
 
 
 @app.get('/api/sessions/{session_id}/export')
