@@ -1,18 +1,4 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
 .venv/
-venv/
-*.egg-info/
-
-# Данные и результаты прогонов не версионируются
-data/train/
-data/test/
-data/synthetic/
-data/service_catalog/
-runs/
-submission.csv
-*.tif
-*.tiff
-*.npz
-configs/calibrated.yaml
+__pycache__/
+*.pyc
+.pytest_cache/

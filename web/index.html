@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Автономное управление спутниковой группировкой</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Планирование спутниковой группировки</h1>
+  <div id="session-badge" class="badge hidden"></div>
+</header>
+
+<section id="setup" class="panel">
+  <h2>1. Сценарий смены</h2>
+  <div class="row">
+    <label>Сценарий
+      <select id="scenario-select"></select>
+    </label>
+    <label>Цель управления
+      <select id="goal-select">
+        <option value="priority">Приоритетное обслуживание</option>
+        <option value="revenue">Коммерческая отдача</option>
+      </select>
+    </label>
+    <label>Алгоритм
+      <select id="algorithm-select">
+        <option value="scoring">Наш планировщик (scoring-greedy)</option>
+        <option value="baseline">Baseline (earliest deadline)</option>
+      </select>
+    </label>
+  </div>
+
+  <details>
+    <summary>Изменить условия эксперимента (необязательно)</summary>
+    <div class="row">
+      <label>Заряд аппарата <input id="ov-soc-sat" placeholder="S01" size="6"></label>
+      <label>% <input id="ov-soc-val" type="number" min="0" max="100" size="4"></label>
+      <label>Коэфф. солнечной мощности <input id="ov-solar" type="number" step="0.05" size="5"></label>
+    </div>
+    <div class="row">
+      <label>Приоритет задания <input id="ov-prio-job" placeholder="JOB-0001" size="10"></label>
+      <label>Новый приоритет <input id="ov-prio-val" type="number" min="1" max="3" size="3"></label>
+    </div>
+  </details>
+
+  <button id="btn-create">Загрузить сценарий и запустить смену</button>
+</section>
+
+<section id="workspace" class="hidden">
+
+  <section class="panel">
+    <h2>2. Ход расчёта</h2>
+    <div class="row">
+      <button id="btn-step">Шаг (+1)</button>
+      <label>Шагов вперёд <input id="advance-n" type="number" value="10" min="1" size="4"></label>
+      <button id="btn-advance-n">Выполнить</button>
+      <label>До шага <input id="advance-until" type="number" size="5"></label>
+      <button id="btn-advance-until">Остановиться перед</button>
+      <button id="btn-advance-all">Выполнить всё до конца</button>
+      <span id="step-indicator"></span>
+    </div>
+    <div class="row">
+      <label>Сменить цель на этом шаге
+        <select id="goal-switch-select">
+          <option value="priority">Приоритетное обслуживание</option>
+          <option value="revenue">Коммерческая отдача</option>
+        </select>
+      </label>
+      <button id="btn-switch-goal">Применить</button>
+      <button id="btn-export">Выгрузить результат (JSON)</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>3. Новое сообщение (событие)</h2>
+    <div class="row">
+      <label>Тип
+        <select id="event-type">
+          <option value="add_jobs">Поступление заданий</option>
+          <option value="satellite_outage">Недоступность аппаратов</option>
+          <option value="close_downlink">Отмена сеансов передачи</option>
+        </select>
+      </label>
+      <label>Аппараты (через запятую) <input id="event-sats" placeholder="S01,S02" size="14"></label>
+      <label>До шага <input id="event-end" type="number" size="5"></label>
+    </div>
+    <div class="row" id="event-job-row">
+      <label>ID задания <input id="ej-id" placeholder="NEW-01" size="10"></label>
+      <label>Тип <select id="ej-kind"><option value="relay">relay</option><option value="downlink">downlink</option></select></label>
+      <label>work_steps <input id="ej-work" type="number" value="1" size="3"></label>
+      <label>deadline_step <input id="ej-deadline" type="number" size="5"></label>
+      <label>priority <input id="ej-priority" type="number" min="1" max="3" value="2" size="2"></label>
+      <label>value_usd <input id="ej-value" type="number" value="10" size="5"></label>
+    </div>
+    <button id="btn-send-event">Отправить сообщение</button>
+    <div id="event-error" class="error"></div>
+  </section>
+
+  <section class="panel">
+    <h2>4. Показатели смены</h2>
+    <div id="summary-cards" class="cards"></div>
+  </section>
+
+  <section class="panel">
+    <h2>5. Состояние аппаратов</h2>
+    <div class="scroll"><table id="sat-table"><thead></thead><tbody></tbody></table></div>
+    <canvas id="soc-chart" width="900" height="160"></canvas>
+    <div class="hint">Заряд аппаратов по шагам (каждая линия — один аппарат)</div>
+  </section>
+
+  <section class="panel">
+    <h2>6. Задания</h2>
+    <div class="row">
+      <input id="job-filter" placeholder="Фильтр по id / статусу (done, missed, active)">
+    </div>
+    <div class="scroll"><table id="jobs-table"><thead></thead><tbody></tbody></table></div>
+    <div id="jobs-hint" class="hint">Кликните по строке задания, чтобы разобрать его историю по шагам.</div>
+    <div id="job-explain"></div>
+  </section>
+
+  <section class="panel">
+    <h2>7. Журнал решений</h2>
+    <div class="row">
+      <input id="log-filter" placeholder="Фильтр по причине (accepted, energy_reserve, thermal_limit, ...)">
+    </div>
+    <div class="scroll"><table id="log-table"><thead></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="panel">
+    <h2>8. Сравнение вариантов</h2>
+    <div class="row">
+      <label>Цель второй ветви
+        <select id="fork-goal">
+          <option value="priority">Приоритетное обслуживание</option>
+          <option value="revenue">Коммерческая отдача</option>
+        </select>
+      </label>
+      <label>Алгоритм второй ветви
+        <select id="fork-algorithm">
+          <option value="scoring">scoring-greedy</option>
+          <option value="baseline">baseline</option>
+        </select>
+      </label>
+      <button id="btn-fork">Создать ветвь сравнения из текущего состояния</button>
+    </div>
+    <div id="compare-panel"></div>
+  </section>
+
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
