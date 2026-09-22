@@ -251,3 +251,27 @@ def test_uploaded_scenario_name_does_not_clash_with_bundled():
     # the bundled P01 still loads with its own 16 satellites
     bundled = client.post('/api/sessions', json={'scenario': 'P01_intro'}).json()
     assert len(bundled['observation']['state']) == 16
+
+
+def test_readable_report_matches_the_run():
+    """The readable report must agree with the machine-readable export."""
+    created = client.post('/api/sessions', json={
+        'scenario': 'P01_intro', 'goal': 'priority', 'algorithm': 'scoring'})
+    sid = created.json()['id']
+    client.post(f'/api/sessions/{sid}/advance', json={'until_step': 20})
+    client.post(f'/api/sessions/{sid}/event', json={'event': {
+        'id': 'E-REPORT', 'at_step': 20, 'type': 'satellite_outage',
+        'satellite_ids': ['S03'], 'end_step': 30}})
+    client.post(f'/api/sessions/{sid}/advance', json={'until_step': 48})
+
+    report = client.get(f'/api/sessions/{sid}/report')
+    assert report.status_code == 200, report.text
+    text = report.text
+    summary = client.get(f'/api/sessions/{sid}/export').json()['summary']
+
+    assert 'Отчёт по смене' in text
+    assert 'приоритетное обслуживание' in text          # goal spelled out
+    assert f'| Завершено в срок | {summary["jobs_completed"]} |' in text
+    assert f'${summary["revenue_usd"]:,.2f}' in text     # same revenue as the export
+    assert 'E-REPORT' in text                            # received event is listed
+    assert 'Где потеряна работа' in text

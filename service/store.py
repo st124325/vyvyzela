@@ -43,7 +43,12 @@ class Store:
         sid = str(uuid.uuid4())
         planner = PLANNER_FACTORIES[algorithm](goal)
         session = Session(scenario, run_metadata={
-            'goal': goal, 'algorithm': algorithm, 'version': '1.0', 'parameters': {},
+            'goal': goal,
+            # Short key the API selects by, plus the planner's precise name, so
+            # a saved run names the exact algorithm the docs describe.
+            'algorithm': algorithm,
+            'algorithm_name': planner.name,
+            'version': '1.0', 'parameters': {},
         })
         record = Record(id=sid, session=session, planner=planner, algorithm=algorithm,
                          scenario_name=scenario_name, root_id=sid, fork_step=0, label=label)
@@ -70,6 +75,7 @@ class Store:
         session = parent.session.fork()
         session.run_metadata = dict(session.run_metadata, goal=new_goal,
                                      algorithm=new_algorithm,
+                                     algorithm_name=planner.name,
                                      forked_from=parent.root_id, fork_step=parent.session.env.k)
         record = Record(id=new_id, session=session, planner=planner, algorithm=new_algorithm,
                          scenario_name=parent.scenario_name, root_id=parent.root_id,

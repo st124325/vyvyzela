@@ -11,12 +11,14 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from service import scenarios
 from service.comparison import compare
 from service.diagnostics import diagnostics
+from service.report import build_report
 from service.schedule import schedule
 from service.store import Record, store
 
@@ -224,6 +226,13 @@ def export_session(session_id: str) -> dict[str, Any]:
                                    root_id=record.root_id, fork_step=record.fork_step,
                                    goal_switches=record.goal_switches)
     return result
+
+
+@app.get('/api/sessions/{session_id}/report', response_class=PlainTextResponse)
+def session_report(session_id: str) -> str:
+    """The same shift as the JSON export, rendered as a readable Markdown
+    report ("Результат сохраняется в читаемом и машиночитаемом виде")."""
+    return build_report(store.get(session_id))
 
 
 @app.get('/api/sessions/{a_id}/compare/{b_id}')

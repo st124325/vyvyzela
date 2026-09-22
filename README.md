@@ -67,7 +67,10 @@ python3 -m venv .venv
    и простоя.
 7. Форкнуть текущее состояние в ветвь сравнения с другими
    целью/алгоритмом, досчитать обе и увидеть разницу и вердикт.
-8. Выгрузить результат — файл по схеме `cosmo-B-ops-result-1.0`.
+8. Выгрузить результат в двух видах: **«Отчёт»** — читаемый Markdown
+   (итоги смены, полученные сообщения, разбор потерь) и **«Выгрузить JSON»** —
+   машиночитаемый файл по схеме `cosmo-B-ops-result-1.0`, по которому расчёт
+   воспроизводится.
 
 ## Тесты
 
@@ -119,9 +122,10 @@ python3 -c "import json; a=json.load(open('examples/saved_runs/P01_priority_scor
 | `GET /api/sessions/{id}/diagnostics` | потери и узкие места: жёсткие ограничения задачи vs влияние планировщика |
 | `GET /api/sessions/{id}/schedule` | расписание по аппаратам для Гант-таймлайна (действия, окна связи, события) |
 | `GET /api/sessions/{id}/export` | полный результат смены (`cosmo-B-ops-result-1.0`) |
+| `GET /api/sessions/{id}/report` | тот же расчёт читаемым отчётом (Markdown) |
 
 ## Версия алгоритма
 
-`run_metadata` каждой смены содержит `algorithm` (`scoring-greedy` или
-`baseline-edf`), `goal` и `version`; при смене цели на ходу — журнал
+`run_metadata` каждой смены содержит `algorithm` (ключ выбора) и
+`algorithm_name` (`scoring-greedy` или `baseline-edf`), `goal` и `version`; при смене цели на ходу — журнал
 переключений; при сравнении — `root_id`/`fork_step` ветви-источника.

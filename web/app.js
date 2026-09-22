@@ -93,6 +93,7 @@ async function createSession() {
   el('playbar').classList.remove('hidden');
   el('statusbar').classList.remove('hidden');
   el('btn-export').disabled = false;
+  el('btn-report').disabled = false;
   document.querySelectorAll('.tab[disabled]').forEach(t => (t.disabled = false));
   el('goal-switch-select').value = session.goal;
   switchTab('monitor');
@@ -210,6 +211,17 @@ async function switchGoal() {
   });
   state.session = view;
   renderAll();
+}
+
+async function exportReport() {
+  const res = await fetch(`/api/sessions/${state.session.id}/report`);
+  if (!res.ok) throw new Error('Не удалось построить отчёт');
+  const text = await res.text();
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${state.session.scenario_name}_отчёт.md`;
+  a.click();
 }
 
 async function exportSession() {
@@ -721,6 +733,7 @@ el('btn-advance-all').addEventListener('click', () =>
   advance({ until_step: state.session.total_steps }).catch(e => alert(e.message)));
 el('btn-switch-goal').addEventListener('click', () => switchGoal().catch(e => alert(e.message)));
 el('btn-export').addEventListener('click', () => exportSession().catch(e => alert(e.message)));
+el('btn-report').addEventListener('click', () => exportReport().catch(e => alert(e.message)));
 el('btn-send-event').addEventListener('click', () => sendEvent());
 el('btn-send-event-json').addEventListener('click', () => sendEventJson());
 el('scenario-file').addEventListener('change', (e) => {
