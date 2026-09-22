@@ -157,11 +157,16 @@ class GreedyPlanner:
         return ((mask >> k) & ((1 << window) - 1)).bit_count()
 
     def _sync_job_index(self, env: Any) -> None:
-        new_ids = env.jobs.keys() - self._indexed_job_ids
+        # Sorted on purpose: the difference of two sets iterates in hash order,
+        # which varies between processes. That order decides the index order,
+        # which decides how equal scores break ties in the assignment sort — so
+        # without sorting, the same scenario yields a different schedule on
+        # every run. Sorting makes the planner reproducible.
+        new_ids = sorted(env.jobs.keys() - self._indexed_job_ids)
         for jid in new_ids:
             for sid in env.jobs[jid]['eligible_satellites']:
                 self._jobs_by_satellite[sid].append(jid)
-        self._indexed_job_ids |= new_ids
+        self._indexed_job_ids.update(new_ids)
 
     def _proactive_calibration_ok(self, env: Any, sid: str) -> bool:
         """True if this satellite may usefully calibrate during an idle step:

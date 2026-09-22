@@ -101,3 +101,30 @@ def test_proactive_calibration_uses_idle_step():
     env_b = Environment(scenario)
     baseline = make_baseline_planner('priority').plan_step(_Sess(env_b))
     assert 'S01' not in baseline  # baseline idles (no proactive maintenance)
+
+
+def test_job_index_order_is_canonical_not_hash_dependent():
+    """The job index decides how equal scores break ties in the assignment
+    sort, so its order must not depend on set iteration (which varies with the
+    per-process string hash seed). Without this, the same scenario produced a
+    different schedule on every run — P04 revenue swung by ~$90 between runs.
+    """
+    scenario = _one_sat_scenario([
+        {'id': f'JOB-{i:03d}', 'kind': 'relay', 'release_step': 0, 'deadline_step': 5,
+         'work_steps': 1, 'eligible_satellites': ['S01'], 'priority': 2, 'value_usd': 10.0}
+        for i in range(40)
+    ])
+    env = Environment(scenario)
+    planner = make_scoring_planner('priority')
+    planner._sync_job_index(env)
+    indexed = planner._jobs_by_satellite['S01']
+    assert indexed == sorted(indexed), 'index must be built in a canonical order'
+
+
+def test_repeated_runs_of_one_scenario_agree():
+    """Two runs of the same scenario with the same settings must match — the
+    postановка expects the algorithm's randomness to be pinned down."""
+    scenario = load(DATA)
+    first = run_session(scenario, make_scoring_planner('revenue')).summary()
+    second = run_session(load(DATA), make_scoring_planner('revenue')).summary()
+    assert first == second
