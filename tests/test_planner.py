@@ -16,9 +16,11 @@ DATA = Path(__file__).resolve().parent.parent / 'data' / 'P01_intro.json'
 
 
 class _Sess:
-    """Minimal Session stand-in exposing just ``.env`` for plan_step."""
-    def __init__(self, env):
+    """Minimal Session stand-in for plan_step: the planner reads ``.env`` and
+    ``.events`` (the latter tells it when availability may have changed)."""
+    def __init__(self, env, events=()):
         self.env = env
+        self.events = list(events)
 
 
 def _run(goal, planner_factory):

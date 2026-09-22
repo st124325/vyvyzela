@@ -18,11 +18,18 @@ Two strategies are provided:
   calibration never has to fall on a scarce contact window ("отложенная
   калибровка может сорвать следующий сеанс связи").
 
-Both planners skip provably-doomed jobs (more work remaining than steps left
-in the window): partial work earns nothing, so spending a slot on a job that
-can no longer finish in time is never useful. That is shared correctness — it
-also keeps the baseline a fair earliest-deadline opponent rather than a
-strawman that hammers hopeless jobs — not a strategy difference.
+Both planners skip provably-doomed jobs: partial work earns nothing, so
+spending a slot on a job that can no longer finish in time is never useful.
+A job counts as doomed when the steps on which it *could* still be worked —
+i.e. some eligible satellite has the required contact and is not in a known
+outage — number fewer than the work it still needs. Counting bare steps is
+not enough: a relay job with five steps left but only two contact windows is
+already lost, and starting it burns slots that a completable job could use.
+
+Availability is precomputed per satellite as a bitmask over the shift, so the
+test is a shift-and-popcount rather than a scan — it has to run for thousands
+of jobs on every step. This is shared correctness, applied to both planners,
+which also keeps the baseline a fair opponent rather than a strawman.
 """
 from __future__ import annotations
 
@@ -40,18 +47,36 @@ TIER_JOB = 1
 TIER_PROACTIVE_CALIBRATION = 0
 
 
+# How much of the work already done on a job still counts against its value
+# density. A job pays out only when finished, so what a further step really
+# buys is value per *remaining* step (weight 0). Counting the full original
+# work (weight 1) ignores progress and makes the planner abandon half-finished
+# jobs under contention, throwing that work away. Pure marginal value is too
+# eager the other way: on an uncontended shift it lets cheap nearly-done jobs
+# crowd out more valuable fresh ones. A quarter weight measured best overall —
+# see docs/REPORT.md for the sweep.
+DONE_WORK_WEIGHT = 0.25
+
+
 def priority_job_score(job: dict, k: int, goal: str) -> float:
     """Scores a job candidate by deadline pressure, priority and value.
 
     ``slack`` is how many spare steps remain before the job would miss its
     deadline if worked every remaining step. ``priority`` goal weights
     priority cubically so priority-3 jobs dominate; ``revenue`` goal weights
-    value density (value per work step) instead. Urgency (``1/(slack+1)``)
-    breaks ties toward the more time-pressured job.
+    value density instead. Urgency (``1/(slack+1)``) breaks ties toward the
+    more time-pressured job.
+
+    The density denominator is the work still to be paid for, with work
+    already done discounted by ``DONE_WORK_WEIGHT`` — finishing a job that is
+    nearly complete is cheaper than starting an equivalent fresh one, and
+    partial work earns nothing if abandoned.
     """
-    slack = max(0, (job['deadline_step'] - k) - job['remaining_steps'])
+    remaining = job['remaining_steps']
+    done = job['work_steps'] - remaining
+    slack = max(0, (job['deadline_step'] - k) - remaining)
     urgency = 1.0 / (slack + 1)
-    density = job['value_usd'] / max(1, job['work_steps'])
+    density = job['value_usd'] / max(1.0, remaining + DONE_WORK_WEIGHT * done)
     if goal == 'priority':
         return job['priority'] ** 3 * urgency + density * 1e-3
     return density * urgency + job['priority'] * 1e-3
@@ -84,6 +109,52 @@ class GreedyPlanner:
         # number of (satellite, eligible job) pairs instead.
         self._jobs_by_satellite: dict[str, list[str]] = defaultdict(list)
         self._indexed_job_ids: set[str] = set()
+        # Availability bitmasks and the per-job union of them; both are rebuilt
+        # when an event may have changed contacts or outages.
+        self._available_mask: dict[tuple[str, str], int] = {}
+        self._job_reach_mask: dict[str, int] = {}
+        self._availability_events = -1
+
+    def _rebuild_availability(self, env: Any) -> None:
+        """Per-satellite bitmask of steps the satellite could work on: the
+        contact for that job kind is available and no known outage covers the
+        step. Rebuilt whenever an event may have changed availability."""
+        steps = env.s['time']['steps']
+        outage_mask: dict[str, int] = {}
+        for f in env.s['failures']:
+            span = ((1 << (f['end_step'] - f['start_step'])) - 1) << f['start_step']
+            outage_mask[f['satellite_id']] = outage_mask.get(f['satellite_id'], 0) | span
+        self._available_mask = {}
+        for sid in env.sats:
+            row = env.s['environment'][sid]
+            blocked = outage_mask.get(sid, 0)
+            for kind in ('downlink', 'relay'):
+                flags = row[kind + '_available']
+                mask = 0
+                for t in range(steps):
+                    if flags[t]:
+                        mask |= 1 << t
+                self._available_mask[(sid, kind)] = mask & ~blocked
+        self._job_reach_mask.clear()
+
+    def _reachable_steps(self, env: Any, job: dict, k: int) -> int:
+        """How many steps in ``[k, deadline)`` the job could still be worked
+        on by *any* eligible satellite. Relay may change executor between
+        steps, so the union across eligible satellites is the right count;
+        each step is counted once, which also respects one-executor-per-step.
+
+        Ignores energy, temperature and calibration, so it is an upper bound —
+        a job failing this test is doomed beyond doubt."""
+        mask = self._job_reach_mask.get(job['id'])
+        if mask is None:
+            mask = 0
+            for sid in job['eligible_satellites']:
+                mask |= self._available_mask.get((sid, job['kind']), 0)
+            self._job_reach_mask[job['id']] = mask
+        window = job['deadline_step'] - k
+        if window <= 0:
+            return 0
+        return ((mask >> k) & ((1 << window) - 1)).bit_count()
 
     def _sync_job_index(self, env: Any) -> None:
         new_ids = env.jobs.keys() - self._indexed_job_ids
@@ -109,6 +180,10 @@ class GreedyPlanner:
         env = session.env
         k, m = env.k, env.s['model']
         self._sync_job_index(env)
+        # Any received event can add an outage or close downlink windows.
+        if len(session.events) != self._availability_events:
+            self._rebuild_availability(env)
+            self._availability_events = len(session.events)
         candidates: list[tuple[int, float, str, dict, str | None, str]] = []
         for sid in env.sats:
             if not env.available(sid):
@@ -118,12 +193,15 @@ class GreedyPlanner:
                 job = env.jobs[jid]
                 if job['completed_step'] is not None or job['remaining_steps'] <= 0:
                     continue
-                if (job['deadline_step'] - k) - job['remaining_steps'] < 0:
-                    continue  # doomed: cannot finish in the remaining window
                 action = {'action': 'job', 'job_id': jid}
                 ok, _, _ = env.can_execute(sid, action)
                 if not ok:
                     continue
+                # Checked after can_execute on purpose: the cheap check rejects
+                # most jobs (no contact this step), so the reachability count
+                # only runs for jobs that are actually workable right now.
+                if self._reachable_steps(env, job, k) < job['remaining_steps']:
+                    continue  # doomed: too few workable steps left to finish
                 has_feasible_job = True
                 score = self.job_score_fn(job, k, self.goal)
                 candidates.append((TIER_JOB, score, sid, action, jid, job['kind']))
