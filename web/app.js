@@ -26,12 +26,41 @@ function el(id) { return document.getElementById(id); }
 
 // ---------- setup ----------
 
-async function loadScenarios() {
+async function loadScenarios(selectName) {
   const scenarios = await api('/api/scenarios');
   const select = el('scenario-select');
-  select.innerHTML = scenarios.map(s =>
-    `<option value="${s.name}">${s.title} — ${s.satellites} апп., ${s.steps} шагов, ${s.jobs} зад.</option>`
-  ).join('');
+  select.innerHTML = scenarios.map(s => {
+    const tag = s.source === 'uploaded' ? '⬆ ' : '';
+    return `<option value="${s.name}">${tag}${s.title} — ${s.satellites} апп., ${s.steps} шагов, ${s.jobs} зад.</option>`;
+  }).join('');
+  if (selectName) select.value = selectName;
+}
+
+// The jury may bring its own scenario of the same format; it is validated
+// server-side by the case library before it becomes selectable.
+async function uploadScenario(file) {
+  const msg = el('scenario-upload-msg');
+  msg.className = 'upload-msg';
+  msg.textContent = 'Проверяем сценарий…';
+  try {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error('Файл не является корректным JSON: ' + err.message);
+    }
+    const meta = await api('/api/scenarios', {
+      method: 'POST',
+      body: JSON.stringify({ scenario: parsed, name: file.name.replace(/\.json$/i, '') }),
+    });
+    await loadScenarios(meta.name);
+    msg.className = 'upload-msg upload-ok';
+    msg.textContent = `Загружен «${meta.title}»: ${meta.satellites} апп., ${meta.steps} шагов, ${meta.jobs} заданий.`;
+  } catch (err) {
+    msg.className = 'upload-msg upload-err';
+    msg.textContent = 'Сценарий отклонён: ' + err.message;
+  }
 }
 
 function collectOverrides() {
@@ -141,6 +170,28 @@ async function sendEvent() {
       method: 'POST', body: JSON.stringify({ event }),
     });
     state.session = view;
+    renderAll();
+  } catch (err) {
+    el('event-error').textContent = err.message;
+  }
+}
+
+async function sendEventJson() {
+  el('event-error').textContent = '';
+  const raw = el('event-json').value.trim();
+  if (!raw) { el('event-error').textContent = 'Вставьте JSON сообщения.'; return; }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    el('event-error').textContent = 'Некорректный JSON: ' + err.message;
+    return;
+  }
+  try {
+    state.session = await api(`/api/sessions/${state.session.id}/event`, {
+      method: 'POST', body: JSON.stringify({ event: parsed }),
+    });
+    el('event-json').value = '';
     renderAll();
   } catch (err) {
     el('event-error').textContent = err.message;
@@ -671,6 +722,10 @@ el('btn-advance-all').addEventListener('click', () =>
 el('btn-switch-goal').addEventListener('click', () => switchGoal().catch(e => alert(e.message)));
 el('btn-export').addEventListener('click', () => exportSession().catch(e => alert(e.message)));
 el('btn-send-event').addEventListener('click', () => sendEvent());
+el('btn-send-event-json').addEventListener('click', () => sendEventJson());
+el('scenario-file').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) uploadScenario(e.target.files[0]);
+});
 el('btn-fork').addEventListener('click', () => forkSession().catch(e => alert(e.message)));
 el('btn-diagnostics').addEventListener('click', () => loadDiagnostics().catch(e => alert(e.message)));
 el('job-filter').addEventListener('input', () => renderJobs(state.session.observation.jobs, state.session.observation.step));

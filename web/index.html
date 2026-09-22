@@ -69,6 +69,11 @@
       <div class="panel-head">Параметры смены</div>
       <div class="panel-body">
         <div class="prop"><label>Сценарий</label><select id="scenario-select"></select></div>
+        <div class="prop"><label>Загрузить свой</label>
+          <div class="pair">
+            <input id="scenario-file" type="file" accept=".json,application/json">
+          </div></div>
+        <div id="scenario-upload-msg" class="upload-msg"></div>
         <div class="prop"><label>Цель управления</label>
           <select id="goal-select">
             <option value="priority">Приоритетное обслуживание</option>
@@ -188,6 +193,14 @@
           <div class="prop"><label>value_usd</label><input id="ej-value" type="number" value="10"></div>
         </div>
         <button id="btn-send-event" class="btn btn-accent btn-block">Отправить сообщение</button>
+        <details class="subsection">
+          <summary>Вставить готовый JSON сообщения</summary>
+          <div class="subsection-body">
+            <textarea id="event-json" class="json-area" rows="7" placeholder='{"id": "E-1", "at_step": 72, "type": "satellite_outage", "satellite_ids": ["S08"], "end_step": 90}'></textarea>
+            <button id="btn-send-event-json" class="btn btn-block">Отправить JSON как есть</button>
+            <div class="hint">Поле <code>at_step</code> должно совпадать с текущим шагом смены.</div>
+          </div>
+        </details>
         <div id="event-error" class="error"></div>
       </div>
     </div>

@@ -187,3 +187,67 @@ def test_invalid_event_returns_400_and_preserves_state():
     state = client.get(f'/api/sessions/{sid}').json()
     assert state['observation']['step'] == 0
     assert state['events_count'] == 0
+
+
+def _minimal_scenario(sid='UPL-1', steps=4):
+    return {
+        'schema_version': 'cosmo-B-ops-1.0',
+        'meta': {'id': sid, 'title': 'Загруженный сценарий'},
+        'time': {'step_s': 300, 'steps': steps},
+        'model': {'reserve_soc_pct': 30.0, 'critical_soc_pct': 20.0,
+                  'charge_efficiency': 0.92, 'discharge_efficiency': 0.95,
+                  'thermal_tau_s': 1800.0, 'thermal_gain_c_per_w': 0.2,
+                  'heater_below_c': 5.0, 'payload_min_c': -5.0, 'payload_max_c': 45.0,
+                  'charge_min_c': 0.0, 'charge_max_c': 45.0,
+                  'calibration_valid_steps': 48, 'downlink_parallel_limit': 2},
+        'satellites': [{'id': 'S01', 'capacity_wh': 100.0, 'initial_soc_pct': 90.0,
+                        'initial_temp_c': 18.0, 'base_w': 18.0, 'heater_w': 30.0,
+                        'calibration_w': 20.0, 'downlink_w': 90.0, 'relay_w': 65.0,
+                        'initial_calibration_age_steps': 0}],
+        'environment': {'S01': {'solar_w': [200.0] * steps,
+                                'thermal_target_c': [18.0] * steps,
+                                'downlink_available': [True] * steps,
+                                'relay_available': [True] * steps}},
+        'jobs': [{'id': 'J1', 'kind': 'relay', 'release_step': 0, 'deadline_step': 3,
+                  'work_steps': 1, 'eligible_satellites': ['S01'], 'priority': 3,
+                  'value_usd': 25.0}],
+        'failures': [],
+    }
+
+
+def test_uploaded_scenario_becomes_runnable():
+    """The jury may bring an additional scenario of the same format."""
+    up = client.post('/api/scenarios', json={'scenario': _minimal_scenario(), 'name': 'jury-run'})
+    assert up.status_code == 200, up.text
+    meta = up.json()
+    assert meta['name'] == 'jury-run' and meta['source'] == 'uploaded'
+    assert meta['satellites'] == 1 and meta['steps'] == 4
+
+    assert any(s['name'] == 'jury-run' for s in client.get('/api/scenarios').json())
+
+    created = client.post('/api/sessions', json={'scenario': 'jury-run'})
+    assert created.status_code == 200, created.text
+    sid = created.json()['id']
+    done = client.post(f'/api/sessions/{sid}/advance', json={'until_step': 4})
+    assert done.status_code == 200
+    assert done.json()['summary']['steps_executed'] == 4
+
+
+def test_malformed_uploaded_scenario_is_rejected():
+    bad = _minimal_scenario()
+    del bad['satellites']          # violates the published schema
+    resp = client.post('/api/scenarios', json={'scenario': bad})
+    assert resp.status_code == 400
+    # the broken upload must not become selectable
+    assert not any(s['title'] == 'Загруженный сценарий' and s['name'].startswith('UPL')
+                   for s in client.get('/api/scenarios').json())
+
+
+def test_uploaded_scenario_name_does_not_clash_with_bundled():
+    """Uploading under a bundled name must not shadow the bundled scenario."""
+    up = client.post('/api/scenarios', json={'scenario': _minimal_scenario(), 'name': 'P01_intro'})
+    assert up.status_code == 200
+    assert up.json()['name'] != 'P01_intro'
+    # the bundled P01 still loads with its own 16 satellites
+    bundled = client.post('/api/sessions', json={'scenario': 'P01_intro'}).json()
+    assert len(bundled['observation']['state']) == 16

@@ -26,6 +26,11 @@ app = FastAPI(title='Constellation Planning Service')
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
 
 
+class UploadScenarioRequest(BaseModel):
+    scenario: dict[str, Any]
+    name: str | None = None
+
+
 class CreateSessionRequest(BaseModel):
     scenario: str
     goal: str = 'priority'
@@ -104,6 +109,13 @@ async def _bad_request(_request: Any, exc: ValueError) -> None:
 @app.get('/api/scenarios')
 def list_scenarios() -> list[dict[str, Any]]:
     return scenarios.list_scenarios()
+
+
+@app.post('/api/scenarios')
+def upload_scenario(req: UploadScenarioRequest) -> dict[str, Any]:
+    """Accepts an additional scenario of the same format (the jury may bring
+    its own). Validated with the case library before it is registered."""
+    return scenarios.add_uploaded(req.scenario, req.name)
 
 
 @app.post('/api/sessions')

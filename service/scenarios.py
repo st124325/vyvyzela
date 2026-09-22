@@ -1,4 +1,9 @@
-"""Lists bundled scenarios and applies pre-run experiment overrides.
+"""Lists bundled and uploaded scenarios, and applies pre-run overrides.
+
+The jury may "загрузить дополнительный сценарий того же формата", so a
+scenario can also be uploaded at runtime: it is validated with the case
+library and kept in memory for the life of the process, alongside the
+bundled ones in ``data/``.
 
 Overrides only touch the knobs the postановка explicitly allows changing
 before a run (initial charge of a chosen satellite, solar power coefficient,
@@ -16,22 +21,44 @@ from model.resource_env import load, validate
 
 DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
 
+# Scenarios uploaded through the API, kept for the life of the process.
+_uploaded: dict[str, dict] = {}
+
+
+def _meta(name: str, scenario: dict, source: str) -> dict[str, Any]:
+    return {
+        'name': name,
+        'title': scenario['meta'].get('title', name),
+        'satellites': len(scenario['satellites']),
+        'steps': scenario['time']['steps'],
+        'jobs': len(scenario['jobs']),
+        'source': source,
+    }
+
 
 def list_scenarios() -> list[dict[str, Any]]:
-    out = []
-    for path in sorted(DATA_DIR.glob('*.json')):
-        scenario = load(path)
-        out.append({
-            'name': path.stem,
-            'title': scenario['meta'].get('title', path.stem),
-            'satellites': len(scenario['satellites']),
-            'steps': scenario['time']['steps'],
-            'jobs': len(scenario['jobs']),
-        })
+    out = [_meta(path.stem, load(path), 'bundled') for path in sorted(DATA_DIR.glob('*.json'))]
+    out += [_meta(name, sc, 'uploaded') for name, sc in sorted(_uploaded.items())]
     return out
 
 
+def add_uploaded(scenario: Any, name: str | None = None) -> dict[str, Any]:
+    """Validates an uploaded scenario and registers it under a unique name."""
+    if not isinstance(scenario, dict):
+        raise ValueError('Scenario must be a JSON object')
+    validate(scenario)  # the case library is the authority on the format
+    base = (name or scenario['meta'].get('id') or 'uploaded').strip() or 'uploaded'
+    unique, n = base, 2
+    taken = set(_uploaded) | {p.stem for p in DATA_DIR.glob('*.json')}
+    while unique in taken:
+        unique, n = f'{base}-{n}', n + 1
+    _uploaded[unique] = copy.deepcopy(scenario)
+    return _meta(unique, scenario, 'uploaded')
+
+
 def load_scenario(name: str) -> dict:
+    if name in _uploaded:
+        return copy.deepcopy(_uploaded[name])
     path = DATA_DIR / f'{name}.json'
     if not path.is_file():
         raise FileNotFoundError(f'Unknown scenario: {name}')
