@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from service import scenarios
+from service.comparison import compare
 from service.diagnostics import diagnostics
 from service.schedule import schedule
 from service.store import Record, store
@@ -218,21 +219,7 @@ def compare_sessions(a_id: str, b_id: str) -> dict[str, Any]:
     a, b = store.get(a_id), store.get(b_id)
     if a.root_id != b.root_id:
         raise ValueError('Sessions do not share a common branch point; fork one from the other to compare')
-    sa, sb = a.session.summary(), b.session.summary()
-    diff = {
-        'jobs_completed': sa['jobs_completed'] - sb['jobs_completed'],
-        'critical_jobs_completed_on_time':
-            sa['critical_jobs_completed_on_time'] - sb['critical_jobs_completed_on_time'],
-        'revenue_usd': round(sa['revenue_usd'] - sb['revenue_usd'], 6),
-        'jobs_due_missed': sa['jobs_due_missed'] - sb['jobs_due_missed'],
-    }
-    if diff['critical_jobs_completed_on_time'] == 0 and diff['revenue_usd'] == 0:
-        verdict = 'Результаты сопоставимы: обе ветви завершили одинаковое число приоритетных заданий и дали одинаковую выручку.'
-    else:
-        better = a if (diff['critical_jobs_completed_on_time'] > 0 or
-                        (diff['critical_jobs_completed_on_time'] == 0 and diff['revenue_usd'] > 0)) else b
-        verdict = f'Предпочтительнее ветвь {better.id} ({better.label or better.algorithm}/{better.planner.goal}).'
-    return {'a': record_view(a), 'b': record_view(b), 'diff': diff, 'verdict': verdict}
+    return {'a': record_view(a), 'b': record_view(b), **compare(a, b)}
 
 
 # Registered last so it only catches paths the API routes above did not.

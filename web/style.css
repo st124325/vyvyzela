@@ -247,3 +247,25 @@ tbody tr:hover { background: rgba(87,125,180,.10); }
 ::-webkit-scrollbar-track { background: var(--region); }
 ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 6px; border: 2px solid var(--region); }
 ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+
+/* ── Comparison table ───────────────────────────────────────── */
+.compare-heads { align-items: center; }
+.cmp-table td { font-family: var(--mono); }
+.cmp-table .cmp-name { font-family: var(--sans); color: var(--text-dim); }
+.cmp-group td {
+  background: var(--header); color: var(--text-mute); font-family: var(--sans);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 4px 9px;
+}
+.cmp-better { color: var(--good); font-weight: 600; background: rgba(106,171,91,.10); }
+.cmp-delta { color: var(--text-mute); }
+.goal-star { color: var(--accent-hi); }
+.warn-box {
+  background: rgba(224,164,74,.12); border: 1px solid var(--warn);
+  border-radius: var(--radius); padding: 7px 10px; margin: 8px 0;
+  font-size: 12px; color: #f0c98a;
+}
+.verdict {
+  margin-top: 12px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
+  background: var(--region); border-left: 3px solid var(--accent-hi);
+  border-radius: var(--radius); color: var(--text);
+}

@@ -578,24 +578,80 @@ function renderLog() {
   }).join('');
 }
 
+const COMPARE_METRICS = [
+  ['Обязательства', [
+    ['critical_jobs_completed_on_time', 'Приоритет-3 в срок', 'int'],
+    ['revenue_usd', 'Выручка', 'usd'],
+    ['jobs_completed', 'Выполнено заданий', 'int'],
+    ['jobs_due_missed', 'Просрочено', 'int'],
+    ['work_steps_in_missed_jobs', 'Работа впустую, шагов', 'int'],
+  ]],
+  ['Остатки ресурсов', [
+    ['minimum_soc_pct', 'Минимальный заряд, %', 'num'],
+    ['below_reserve_satellite_steps', 'Ниже резерва, апп×шаг', 'int'],
+    ['brownout_satellite_steps', 'Провалы по энергии', 'int'],
+    ['blocked_command_count', 'Отклонённых команд', 'int'],
+  ]],
+];
+
+const GOAL_PRIMARY_METRIC = {
+  priority: 'critical_jobs_completed_on_time',
+  revenue: 'revenue_usd',
+};
+
+function fmtMetric(kind, v) {
+  if (v === undefined || v === null) return '—';
+  if (kind === 'usd') return '$' + v.toFixed(2);
+  if (kind === 'num') return v.toFixed(1);
+  return String(v);
+}
+
+function fmtDelta(kind, v) {
+  const sign = v > 0 ? '+' : '';
+  if (kind === 'usd') return sign + '$' + v.toFixed(2);
+  if (kind === 'num') return sign + v.toFixed(1);
+  return sign + String(v);
+}
+
 function renderCompare() {
   const panel = el('compare-panel');
-  if (!state.compare) { panel.innerHTML = '<div class="hint">Ветвь сравнения ещё не создана.</div>'; return; }
+  if (!state.compare) {
+    panel.innerHTML = '<div class="hint">Ветвь сравнения ещё не создана. Форкните текущее состояние, чтобы сравнить две стратегии из одной точки.</div>';
+    return;
+  }
   const a = state.session, b = state.compare;
-  let html = `<div class="row">
-    <div class="card"><div class="label">Ветвь A</div><div class="value">${a.label || a.algorithm}/${a.goal}</div></div>
-    <div class="card"><div class="label">Ветвь B</div><div class="value">${b.label || b.algorithm}/${b.goal}</div></div>
-    <button id="btn-run-compare">Досчитать обе ветви и сравнить</button>
+  let html = `<div class="row compare-heads">
+    <div class="card"><div class="label">Ветвь A · шаг ${a.observation.step}/${a.total_steps}</div><div class="value">${a.label || a.algorithm}/${a.goal}</div></div>
+    <div class="card"><div class="label">Ветвь B · шаг ${b.observation.step}/${b.total_steps}</div><div class="value">${b.label || b.algorithm}/${b.goal}</div></div>
+    <button id="btn-run-compare" class="btn btn-accent">Досчитать обе ветви и сравнить</button>
   </div>`;
-  if (state.compareResult) {
-    const d = state.compareResult.diff;
-    html += `<div class="cards">
-      <div class="card"><div class="value">${d.jobs_completed >= 0 ? '+' : ''}${d.jobs_completed}</div><div class="label">Δ выполнено (A−B)</div></div>
-      <div class="card"><div class="value">${d.critical_jobs_completed_on_time >= 0 ? '+' : ''}${d.critical_jobs_completed_on_time}</div><div class="label">Δ приоритет-3</div></div>
-      <div class="card"><div class="value">${d.revenue_usd >= 0 ? '+' : ''}$${d.revenue_usd.toFixed(2)}</div><div class="label">Δ выручка</div></div>
-      <div class="card"><div class="value">${d.jobs_due_missed >= 0 ? '+' : ''}${d.jobs_due_missed}</div><div class="label">Δ просрочено</div></div>
-    </div>
-    <div class="hint">${state.compareResult.verdict}</div>`;
+
+  const res = state.compareResult;
+  if (res) {
+    if (res.warnings && res.warnings.length) {
+      html += res.warnings.map(w => `<div class="warn-box">⚠ ${w}</div>`).join('');
+    }
+    const primaryA = GOAL_PRIMARY_METRIC[res.goal_a];
+    const primaryB = GOAL_PRIMARY_METRIC[res.goal_b];
+    const rows = COMPARE_METRICS.map(([group, metrics]) => {
+      const body = metrics.filter(([key]) => res.diff[key]).map(([key, title, kind]) => {
+        const d = res.diff[key];
+        const star = (key === primaryA || key === primaryB) ? ' <span class="goal-star" title="основная метрика выбранной цели">★</span>' : '';
+        const cls = (side) => d.better === side ? ' class="cmp-better"' : '';
+        return `<tr>
+          <td class="cmp-name">${title}${star}</td>
+          <td${cls('a')}>${fmtMetric(kind, d.a)}</td>
+          <td${cls('b')}>${fmtMetric(kind, d.b)}</td>
+          <td class="cmp-delta">${d.delta === 0 ? '—' : fmtDelta(kind, d.delta)}</td>
+        </tr>`;
+      }).join('');
+      return `<tr class="cmp-group"><td colspan="4">${group}</td></tr>${body}`;
+    }).join('');
+
+    html += `<div class="scroll"><table class="cmp-table">
+      <thead><tr><th>Показатель</th><th>Ветвь A</th><th>Ветвь B</th><th>Δ (A−B)</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div class="verdict">${res.verdict}</div>`;
   }
   panel.innerHTML = html;
   const btn = document.getElementById('btn-run-compare');
