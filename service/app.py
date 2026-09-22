@@ -141,8 +141,11 @@ def get_session(session_id: str) -> dict[str, Any]:
 @app.post('/api/sessions/{session_id}/advance')
 def advance_session(session_id: str, req: AdvanceRequest) -> dict[str, Any]:
     record = store.get(session_id)
-    rows = _advance(record, req.steps, req.until_step)
-    view = record_view(record)
+    # Stepping mutates the session in place; concurrent requests on the same
+    # session would interleave inside the model and corrupt the journal.
+    with record.lock:
+        rows = _advance(record, req.steps, req.until_step)
+        view = record_view(record)
     view['rows'] = rows
     return view
 
@@ -150,8 +153,9 @@ def advance_session(session_id: str, req: AdvanceRequest) -> dict[str, Any]:
 @app.post('/api/sessions/{session_id}/event')
 def send_event(session_id: str, req: EventRequest) -> dict[str, Any]:
     record = store.get(session_id)
-    record.session.apply_event(req.event)
-    return record_view(record)
+    with record.lock:
+        record.session.apply_event(req.event)
+        return record_view(record)
 
 
 @app.post('/api/sessions/{session_id}/goal')
@@ -159,9 +163,10 @@ def set_goal(session_id: str, req: GoalRequest) -> dict[str, Any]:
     record = store.get(session_id)
     if req.goal not in ('priority', 'revenue'):
         raise ValueError('goal must be "priority" or "revenue"')
-    record.planner.goal = req.goal
-    record.goal_switches.append({'step': record.session.env.k, 'goal': req.goal})
-    return record_view(record)
+    with record.lock:
+        record.planner.goal = req.goal
+        record.goal_switches.append({'step': record.session.env.k, 'goal': req.goal})
+        return record_view(record)
 
 
 @app.post('/api/sessions/{session_id}/fork')
@@ -180,7 +185,12 @@ def explain_job(session_id: str, job_id: str) -> dict[str, Any]:
     смешивать") — it does not claim the job was unwinnable, only what
     happened under this run.
     """
-    env = store.get(session_id).session.env
+    record = store.get(session_id)
+    with record.lock:
+        return _explain_job(record.session.env, job_id)
+
+
+def _explain_job(env: Any, job_id: str) -> dict[str, Any]:
     job = env.jobs.get(job_id)
     if job is None:
         raise KeyError(f'Unknown job: {job_id}')
@@ -207,7 +217,9 @@ def delete_session(session_id: str) -> dict[str, str]:
 def session_diagnostics(session_id: str) -> dict[str, Any]:
     """Aggregate loss analysis: blocked-command reasons and a breakdown of
     missed jobs into hard task limits vs planner-influenceable misses."""
-    return diagnostics(store.get(session_id).session.env)
+    record = store.get(session_id)
+    with record.lock:
+        return diagnostics(record.session.env)
 
 
 @app.get('/api/sessions/{session_id}/schedule')
@@ -215,13 +227,15 @@ def session_schedule(session_id: str) -> dict[str, Any]:
     """Per-satellite executed schedule for the Gantt timeline, with contact
     windows, outages and event markers — all from real state, no orbits."""
     record = store.get(session_id)
-    return schedule(record.session.env, record.session.events)
+    with record.lock:
+        return schedule(record.session.env, record.session.events)
 
 
 @app.get('/api/sessions/{session_id}/export')
 def export_session(session_id: str) -> dict[str, Any]:
     record = store.get(session_id)
-    result = record.session.result()
+    with record.lock:
+        result = record.session.result()
     result['run_metadata'] = dict(result['run_metadata'], label=record.label,
                                    root_id=record.root_id, fork_step=record.fork_step,
                                    goal_switches=record.goal_switches)
@@ -232,7 +246,9 @@ def export_session(session_id: str) -> dict[str, Any]:
 def session_report(session_id: str) -> str:
     """The same shift as the JSON export, rendered as a readable Markdown
     report ("Результат сохраняется в читаемом и машиночитаемом виде")."""
-    return build_report(store.get(session_id))
+    record = store.get(session_id)
+    with record.lock:
+        return build_report(record)
 
 
 @app.get('/api/sessions/{a_id}/compare/{b_id}')
